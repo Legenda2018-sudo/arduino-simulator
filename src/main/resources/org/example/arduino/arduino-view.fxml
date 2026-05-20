@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.*?>
+<?import javafx.scene.canvas.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane stylesheets="@styles.css" xmlns="http://javafx.com/javafx/17.0.12" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.example.arduino.ArduinoController">
+
+    <top>
+        <VBox spacing="4" styleClass="toolbar">
+            <padding>
+                <Insets bottom="6" left="10" right="10" top="6" />
+            </padding>
+            <HBox alignment="CENTER_LEFT" spacing="8">
+                <Label styleClass="app-title" text="Симулятор Arduino" />
+                <Region HBox.hgrow="ALWAYS" />
+                <Label fx:id="userLabel" styleClass="user-label" text="Гость" wrapText="true" maxWidth="140" />
+
+                <HBox fx:id="authBox" alignment="CENTER_RIGHT" spacing="4">
+                    <TextField fx:id="loginEmailField" maxWidth="140" prefWidth="120" promptText="Email" />
+                    <PasswordField fx:id="loginPasswordField" maxWidth="110" prefWidth="100" promptText="Пароль" />
+                    <Button fx:id="btnLogin" onAction="#onLoginClick" styleClass="action-button,action-auth" text="Войти" />
+                    <Button fx:id="btnRegister" onAction="#onRegisterClick" styleClass="action-button" style="-fx-background-color: #2980b9; -fx-text-fill: white;" text="Рег." />
+                    <Button fx:id="btnLogout" managed="false" onAction="#onLogoutClick" styleClass="action-button,action-danger" text="Выйти" visible="false" />
+                </HBox>
+
+                <HBox fx:id="circuitBox" alignment="CENTER_RIGHT" spacing="4">
+                    <TextField fx:id="circuitNameField" maxWidth="140" prefWidth="120" promptText="Схема" />
+                    <Button fx:id="btnSave" onAction="#onSaveClick" styleClass="action-button,action-save" text="Сохр." />
+                    <Button fx:id="btnLoad" onAction="#onLoadClick" styleClass="action-button,action-save" text="Загр." />
+                    <Button fx:id="btnDeleteCircuit" onAction="#onDeleteCircuitClick" styleClass="action-button,action-danger" text="Удал." />
+                </HBox>
+
+                <Button fx:id="btnClear" onAction="#onClearClick" styleClass="action-button,action-danger" text="Очистить" />
+            </HBox>
+        </VBox>
+    </top>
+
+    <left>
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" vbarPolicy="AS_NEEDED" prefWidth="220" minWidth="210" maxWidth="240" styleClass="sidebar-scroll">
+            <VBox spacing="5" styleClass="sidebar">
+                <padding>
+                    <Insets bottom="10" left="8" right="8" top="10" />
+                </padding>
+
+                <Label styleClass="sidebar-title" text="Компоненты" />
+                <Button fx:id="btnLED" onAction="#onLEDClick" maxWidth="Infinity" styleClass="component-button" text="LED" />
+                <Button fx:id="btnButton" onAction="#onButtonClick" maxWidth="Infinity" styleClass="component-button" text="Кнопка" />
+                <Button fx:id="btnResistor" onAction="#onResistorClick" maxWidth="Infinity" styleClass="component-button" text="Резистор" />
+                <Button fx:id="btnArduino" onAction="#onArduinoClick" maxWidth="Infinity" styleClass="component-button" text="Arduino UNO" />
+                <Button fx:id="btnTimer" onAction="#onTimerClick" maxWidth="Infinity" styleClass="component-button" text="Таймер" />
+
+                <Region prefHeight="1" maxHeight="1" minHeight="1" styleClass="sidebar-divider" />
+
+                <Label styleClass="sidebar-title" text="Инструменты" />
+                <Button fx:id="btnConnect" onAction="#onConnectClick" maxWidth="Infinity" styleClass="tool-button" text="Соединить" />
+                <Button fx:id="btnDelete" onAction="#onDeleteClick" maxWidth="Infinity" styleClass="tool-button" text="Удалить" />
+                <Button fx:id="btnSimulate" onAction="#onSimulateClick" maxWidth="Infinity" styleClass="tool-button-simulate" text="Симуляция" />
+                <Button fx:id="btnDemo" onAction="#onDemoClick" maxWidth="Infinity" styleClass="tool-button" text="Демо-схема" />
+
+                <Region prefHeight="1" maxHeight="1" minHeight="1" styleClass="sidebar-divider" />
+
+                <Label styleClass="sidebar-title" text="Файлы" />
+                <ListView fx:id="circuitList" prefHeight="72" maxHeight="88" minHeight="56" styleClass="circuit-list" />
+                <Button fx:id="btnSaveLocal" onAction="#onSaveLocalClick" maxWidth="Infinity" styleClass="tool-button" text="Сохранить файл" />
+                <Button fx:id="btnLoadLocal" onAction="#onLoadLocalClick" maxWidth="Infinity" styleClass="tool-button" text="Загрузить файл" />
+                <Button fx:id="btnExportPng" onAction="#onExportPngClick" maxWidth="Infinity" styleClass="tool-button" text="Экспорт PNG" />
+            </VBox>
+        </ScrollPane>
+    </left>
+
+    <center>
+        <VBox alignment="CENTER" spacing="0" style="-fx-background-color: #1a1d23; -fx-padding: 4;">
+            <StackPane alignment="CENTER" styleClass="board-frame">
+                <StackPane fx:id="boardHost" alignment="CENTER">
+                    <StackPane fx:id="boardStack">
+                        <Canvas fx:id="breadboardCanvas" height="750" mouseTransparent="true" width="1000" />
+                        <Pane fx:id="wirePane" mouseTransparent="true" prefHeight="750" prefWidth="1000" />
+                        <Pane fx:id="componentPane" onMouseClicked="#onBreadboardClick" onMouseDragged="#onBreadboardMouseDragged" onMouseMoved="#onBreadboardMouseMoved" onMousePressed="#onBreadboardMousePressed" onMouseReleased="#onBreadboardMouseReleased" pickOnBounds="true" prefHeight="750" prefWidth="1000" />
+                    </StackPane>
+                </StackPane>
+            </StackPane>
+        </VBox>
+    </center>
+
+</BorderPane>

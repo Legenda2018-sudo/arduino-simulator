@@ -1,0 +1,174 @@
+.root {
+    -fx-font-family: "Segoe UI", system-ui, sans-serif;
+    -fx-background-color: #1a1d23;
+}
+
+.toolbar {
+    -fx-background-color: #252a31;
+}
+
+.app-title {
+    -fx-font-size: 20px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #ecf0f1;
+}
+
+.user-label {
+    -fx-text-fill: #bdc3c7;
+    -fx-font-size: 12px;
+}
+
+.sidebar {
+    -fx-background-color: #252a31;
+}
+
+.sidebar-scroll {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+}
+
+.sidebar-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
+.sidebar-divider {
+    -fx-background-color: #4a5568;
+    -fx-max-height: 1;
+    -fx-pref-height: 1;
+    -fx-min-height: 1;
+    -fx-max-width: infinity;
+}
+
+.sidebar-title {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #95a5a6;
+    -fx-padding: 4 0 2 0;
+}
+
+.component-button {
+    -fx-background-color: #3d4654;
+    -fx-text-fill: #ecf0f1;
+    -fx-background-radius: 6;
+    -fx-padding: 9 12;
+    -fx-font-size: 13px;
+    -fx-alignment: center;
+    -fx-max-width: infinity;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+
+.component-button:hover {
+    -fx-background-color: #4a5568;
+}
+
+.component-button-selected {
+    -fx-background-color: #27ae60;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.tool-button {
+    -fx-background-color: #3d4654;
+    -fx-text-fill: #ecf0f1;
+    -fx-background-radius: 6;
+    -fx-padding: 9 12;
+    -fx-font-size: 13px;
+    -fx-max-width: infinity;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+
+.tool-button:hover {
+    -fx-background-color: #4a5568;
+}
+
+.tool-button-active {
+    -fx-background-color: #8e44ad;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.tool-button-delete-active {
+    -fx-background-color: #c0392b;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.tool-button-simulate {
+    -fx-background-color: #27ae60;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-background-radius: 6;
+    -fx-padding: 10;
+    -fx-font-size: 13px;
+    -fx-max-width: infinity;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+
+.tool-button-simulate:hover {
+    -fx-background-color: #2ecc71;
+}
+
+.tool-button-simulate-running {
+    -fx-background-color: #c0392b;
+    -fx-text-fill: white;
+}
+
+.action-button {
+    -fx-background-radius: 6;
+    -fx-padding: 6 12;
+}
+
+.action-save {
+    -fx-background-color: #3498db;
+    -fx-text-fill: white;
+}
+
+.action-danger {
+    -fx-background-color: #e74c3c;
+    -fx-text-fill: white;
+}
+
+.action-auth {
+    -fx-background-color: #16a085;
+    -fx-text-fill: white;
+}
+
+.hint-panel {
+    -fx-background-color: #16a085;
+    -fx-background-radius: 10;
+    -fx-padding: 12;
+}
+
+.hint-title {
+    -fx-font-weight: bold;
+    -fx-text-fill: white;
+    -fx-font-size: 13px;
+}
+
+.hint-text {
+    -fx-text-fill: white;
+    -fx-font-size: 11px;
+    -fx-wrap-text: true;
+}
+
+.board-frame {
+    -fx-background-color: #dfe6e9;
+    -fx-background-radius: 10;
+    -fx-padding: 10;
+}
+
+.circuit-list {
+    -fx-background-color: #2c3340;
+    -fx-background-radius: 6;
+    -fx-control-inner-background: #2c3340;
+    -fx-border-color: #3d4654;
+    -fx-border-radius: 6;
+}
+
+.text-field {
+    -fx-background-radius: 6;
+    -fx-padding: 6 10;
+}
