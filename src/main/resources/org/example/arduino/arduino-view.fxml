@@ -34,6 +34,7 @@
 
                 <Button fx:id="btnClear" onAction="#onClearClick" styleClass="action-button,action-danger" text="Очистить" />
             </HBox>
+            <Label fx:id="statusLabel" styleClass="status-label" text="Статус: Готов к работе" wrapText="true" />
         </VBox>
     </top>
 
@@ -50,6 +51,7 @@
                 <Button fx:id="btnResistor" onAction="#onResistorClick" maxWidth="Infinity" styleClass="component-button" text="Резистор" />
                 <Button fx:id="btnArduino" onAction="#onArduinoClick" maxWidth="Infinity" styleClass="component-button" text="Arduino UNO" />
                 <Button fx:id="btnTimer" onAction="#onTimerClick" maxWidth="Infinity" styleClass="component-button" text="Таймер" />
+                <Button fx:id="btnBattery" onAction="#onBatteryClick" maxWidth="Infinity" styleClass="component-button" text="Батарейка" />
 
                 <Region prefHeight="1" maxHeight="1" minHeight="1" styleClass="sidebar-divider" />
 
@@ -57,7 +59,6 @@
                 <Button fx:id="btnConnect" onAction="#onConnectClick" maxWidth="Infinity" styleClass="tool-button" text="Соединить" />
                 <Button fx:id="btnDelete" onAction="#onDeleteClick" maxWidth="Infinity" styleClass="tool-button" text="Удалить" />
                 <Button fx:id="btnSimulate" onAction="#onSimulateClick" maxWidth="Infinity" styleClass="tool-button-simulate" text="Симуляция" />
-                <Button fx:id="btnDemo" onAction="#onDemoClick" maxWidth="Infinity" styleClass="tool-button" text="Демо-схема" />
 
                 <Region prefHeight="1" maxHeight="1" minHeight="1" styleClass="sidebar-divider" />
 

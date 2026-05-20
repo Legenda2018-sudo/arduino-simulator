@@ -71,6 +71,25 @@
                 </configuration>
             </plugin>
             <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <groupId>org.openjfx</groupId>
                 <artifactId>javafx-maven-plugin</artifactId>
                 <version>0.0.8</version>
@@ -91,125 +110,4 @@
             </plugin>
         </plugins>
     </build>
-
-    <profiles>
-        <!-- Сборка .exe для Windows: mvn clean package -Pexe -->
-        <profile>
-            <id>exe</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-dependency-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>copy-deps-for-jpackage</id>
-                                <phase>prepare-package</phase>
-                                <goals>
-                                    <goal>copy-dependencies</goal>
-                                </goals>
-                                <configuration>
-                                    <outputDirectory>${project.build.directory}/jpackage-app</outputDirectory>
-                                    <includeScope>runtime</includeScope>
-                                </configuration>
-                            </execution>
-                            <execution>
-                                <id>copy-javafx-modules</id>
-                                <phase>prepare-package</phase>
-                                <goals>
-                                    <goal>copy-dependencies</goal>
-                                </goals>
-                                <configuration>
-                                    <outputDirectory>${project.build.directory}/jpackage-modules</outputDirectory>
-                                    <includeGroupIds>org.openjfx</includeGroupIds>
-                                    <classifier>win</classifier>
-                                    <includeScope>runtime</includeScope>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-resources-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>copy-jar-for-jpackage</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>copy-resources</goal>
-                                </goals>
-                                <configuration>
-                                    <outputDirectory>${project.build.directory}/jpackage-app</outputDirectory>
-                                    <resources>
-                                        <resource>
-                                            <directory>${project.build.directory}</directory>
-                                            <includes>
-                                                <include>${project.build.finalName}.jar</include>
-                                            </includes>
-                                        </resource>
-                                    </resources>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-antrun-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>clean-old-exe</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>run</goal>
-                                </goals>
-                                <configuration>
-                                    <target>
-                                        <delete dir="${project.build.directory}/dist/ArduinoSimulator" quiet="true"/>
-                                    </target>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>exec-maven-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>jpackage-exe</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                                <configuration>
-                                    <executable>jpackage</executable>
-                                    <arguments>
-                                        <argument>--type</argument>
-                                        <argument>app-image</argument>
-                                        <argument>--input</argument>
-                                        <argument>${project.build.directory}/jpackage-app</argument>
-                                        <argument>--module-path</argument>
-                                        <argument>${project.build.directory}/jpackage-modules</argument>
-                                        <argument>--add-modules</argument>
-                                        <argument>javafx.controls,javafx.fxml,java.logging</argument>
-                                        <argument>--main-jar</argument>
-                                        <argument>${project.build.finalName}.jar</argument>
-                                        <argument>--main-class</argument>
-                                        <argument>org.example.arduino.HelloApplication</argument>
-                                        <argument>--name</argument>
-                                        <argument>ArduinoSimulator</argument>
-                                        <argument>--dest</argument>
-                                        <argument>${project.build.directory}/dist</argument>
-                                        <argument>--app-version</argument>
-                                        <argument>1.0</argument>
-                                        <argument>--verbose</argument>
-                                    </arguments>
-                                    <outputFile>${project.build.directory}/jpackage-output.txt</outputFile>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 </project>

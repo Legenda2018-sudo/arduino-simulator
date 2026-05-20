@@ -58,5 +58,10 @@ public class Button extends Component {
     public String getType() {
         return "Button";
     }
+
+    @Override
+    public Footprint getFootprint() {
+        return new Footprint(28, 14);
+    }
 }
 

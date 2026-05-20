@@ -21,6 +21,10 @@ import javafx.scene.shape.Rectangle;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import org.example.arduino.model.Resistor;
+import org.example.arduino.model.Wire;
+
+import java.util.List;
+import org.example.arduino.util.CircuitAnalyzer;
 import org.example.arduino.util.CircuitPhysics;
 import org.example.arduino.util.ResistorColorCode;
 
@@ -36,6 +40,10 @@ public final class ResistorConfigWindow {
     }
 
     public static void showConfig(Resistor resistor) {
+        showConfig(resistor, null, null);
+    }
+
+    public static void showConfig(Resistor resistor, List<org.example.arduino.model.Component> components, List<Wire> wires) {
         if (resistor == null) {
             return;
         }
@@ -132,6 +140,7 @@ public final class ResistorConfigWindow {
 
         VBox currentCard = createStatCard("Ток через LED", "—", "#1ABC9C");
         VBox statusCard = createStatCard("Оценка", "—", "#3498DB");
+        Label currentCaption = captionLabelOf(currentCard);
         Label currentValue = valueLabelOf(currentCard);
         Label statusValue = valueLabelOf(statusCard);
         stats.add(currentCard, 0, 0);
@@ -157,10 +166,19 @@ public final class ResistorConfigWindow {
             valueLabel.setText(formatResistance(resistor.getResistance()));
             markingLabel.setText("Цветовая маркировка: " + resistor.getColorCodeText());
 
-            CircuitPhysics.CalcResult calc = CircuitPhysics.analyze(resistor.getResistance());
+            CircuitPhysics.CalcResult calc = CircuitPhysics.analyze(
+                CircuitAnalyzer.parallelGroupOhms(resistor, components, wires));
+            boolean parallelInCircuit = components != null && wires != null
+                && Math.abs(calc.getResistorOhms() - resistor.getResistance()) > 0.5;
+            currentCaption.setText(parallelInCircuit ? "Ток в цепи (R паралл.)" : "Ток через LED");
             currentValue.setText(formatCurrent(calc.getCurrentMa()));
             statusValue.setText(calc.getSafety().getMessage());
 
+            String parallelHint = parallelInCircuit
+                ? String.format(
+                    "Параллельно с другим R → в цепи R ≈ %.0f Ом. ",
+                    calc.getResistorOhms())
+                : "";
             statusRow.setStyle(
                 "-fx-background-color: " + calc.getSafety().getColor() + "22;"
                     + " -fx-background-radius: 8;"
@@ -169,7 +187,7 @@ public final class ResistorConfigWindow {
                     + " -fx-border-width: 1.5;"
             );
             statusDot.setStyle("-fx-background-color: " + calc.getSafety().getColor() + "; -fx-background-radius: 5;");
-            statusHint.setText(String.format(
+            statusHint.setText(parallelHint + String.format(
                 "Для LED обычно ставят ≈ %.0f Ом (ток %.0f мА). Безопасный предел — до %.0f мА.",
                 calc.getRecommendedOhms(),
                 CircuitPhysics.LED_I_NOM_MA,
@@ -265,6 +283,10 @@ public final class ResistorConfigWindow {
         }
     }
 
+    private static Label captionLabelOf(VBox card) {
+        return (Label) card.getChildren().get(0);
+    }
+
     private static Label valueLabelOf(VBox card) {
         return (Label) card.getChildren().get(1);
     }
@@ -315,7 +337,10 @@ public final class ResistorConfigWindow {
             return "∞ мА";
         }
         if (currentMa <= 0) {
-            return "—";
+            return "0 мА";
+        }
+        if (currentMa < 0.1) {
+            return String.format("%.3f мА", currentMa);
         }
         return String.format("%.1f мА", currentMa);
     }

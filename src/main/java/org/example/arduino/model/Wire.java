@@ -4,16 +4,20 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Line;
 import javafx.scene.shape.StrokeLineCap;
 
+import org.example.arduino.util.WirePhysics;
+
 public class Wire {
     private final WireAnchor fromAnchor;
     private final WireAnchor toAnchor;
     private Line line;
     private boolean isActive;
+    private double resistanceOhms;
 
     public Wire(WireAnchor fromAnchor, WireAnchor toAnchor) {
         this.fromAnchor = fromAnchor;
         this.toAnchor = toAnchor;
         this.isActive = false;
+        this.resistanceOhms = 0;
         createLine();
     }
 
@@ -34,6 +38,7 @@ public class Wire {
             line.setStartY(fromAnchor.getY());
             line.setEndX(toAnchor.getX());
             line.setEndY(toAnchor.getY());
+            resistanceOhms = WirePhysics.resistanceOhms(fromAnchor, toAnchor);
             if (isActive) {
                 line.setStroke(Color.web("#FF6B35"));
                 line.setStrokeWidth(4);
@@ -79,9 +84,17 @@ public class Wire {
         return isActive;
     }
 
+    /** Сопротивление провода R = k × L (Ом). */
+    public double getResistanceOhms() {
+        return resistanceOhms;
+    }
+
+    public double getLengthPixels() {
+        return WirePhysics.lengthPixels(fromAnchor, toAnchor);
+    }
+
     public boolean connects(WireAnchor a, WireAnchor b) {
         return (fromAnchor.isSameEndpoint(a) && toAnchor.isSameEndpoint(b))
             || (fromAnchor.isSameEndpoint(b) && toAnchor.isSameEndpoint(a));
     }
 }
-

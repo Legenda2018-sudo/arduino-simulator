@@ -18,23 +18,27 @@ import java.util.Set;
 
 /**
  * Упрощённая модель цепи питания через шины +5V и GND (последовательное включение).
+ * Сопротивление проводов: R = k × L.
  */
 public final class PowerRailSimulator {
 
-    public record PowerResult(double seriesOhms, boolean closed) {
+    public record PowerResult(double seriesOhms, double wireOhms, boolean closed) {
         public static PowerResult open() {
-            return new PowerResult(-1, false);
+            return new PowerResult(-1, 0, false);
         }
+    }
+
+    private record State(Component component, double ohms, double wireOhms, Set<Component> visited, boolean seenTarget) {
+    }
+
+    private record NeighborStep(Component component, Wire wire) {
     }
 
     private PowerRailSimulator() {
     }
 
-    /**
-     * Ищет замкнутый путь GND → … → LED → … → +5V (или наоборот) через проводящие компоненты.
-     */
     public static PowerResult analyzeLedPowerPath(LED targetLed, List<Component> components, List<Wire> wires) {
-        if (targetLed == null || targetLed.isBurned() || wires == null) {
+        if (targetLed == null || wires == null) {
             return PowerResult.open();
         }
 
@@ -47,7 +51,7 @@ public final class PowerRailSimulator {
 
     private static PowerResult traceFromRail(boolean fromMinusRail, LED targetLed, List<Wire> wires) {
         Queue<State> queue = new ArrayDeque<>();
-        seedFromRail(fromMinusRail, wires, queue);
+        seedFromRail(fromMinusRail, targetLed, wires, queue);
 
         while (!queue.isEmpty()) {
             State state = queue.poll();
@@ -57,28 +61,40 @@ public final class PowerRailSimulator {
             }
 
             double ohms = state.ohms() + resistanceOf(current);
-            boolean seenLed = state.seenLed() || current == targetLed;
+            double wireOhms = state.wireOhms();
+            boolean seenTarget = state.seenTarget() || current == targetLed;
+            boolean endAtPlusRail = fromMinusRail;
 
-            if (seenLed && touchesRail(current, wires, fromMinusRail)) {
-                return new PowerResult(Math.max(ohms, 1.0), true);
+            if (seenTarget && touchesRail(current, wires, endAtPlusRail)) {
+                double railWire = railConnectionOhms(current, wires, endAtPlusRail);
+                return new PowerResult(ohms + railWire, wireOhms + railWire, true);
             }
 
-            for (Component next : neighbors(current, wires)) {
+            for (NeighborStep step : wireNeighbors(current, wires)) {
+                Component next = step.component();
+                Wire wire = step.wire();
                 if (state.visited().contains(next)) {
                     continue;
                 }
                 if (next instanceof ArduinoUNO) {
                     continue;
                 }
+                double wireAdd = wire.getResistanceOhms();
                 Set<Component> visited = new HashSet<>(state.visited());
                 visited.add(next);
-                queue.offer(new State(next, ohms, visited, seenLed));
+                queue.offer(new State(
+                    next,
+                    ohms + wireAdd,
+                    wireOhms + wireAdd,
+                    visited,
+                    seenTarget || next == targetLed
+                ));
             }
         }
         return PowerResult.open();
     }
 
-    private static void seedFromRail(boolean minusRail, List<Wire> wires, Queue<State> queue) {
+    private static void seedFromRail(boolean minusRail, LED targetLed, List<Wire> wires, Queue<State> queue) {
         for (Wire wire : wires) {
             Component start = null;
             if (minusRail) {
@@ -95,10 +111,27 @@ public final class PowerRailSimulator {
             if (start == null || start instanceof ArduinoUNO) {
                 continue;
             }
+            double wireAdd = wire.getResistanceOhms();
             Set<Component> visited = new HashSet<>();
             visited.add(start);
-            queue.offer(new State(start, 0, visited, start instanceof LED));
+            queue.offer(new State(start, wireAdd, wireAdd, visited, start == targetLed));
         }
+    }
+
+    private static List<NeighborStep> wireNeighbors(Component component, List<Wire> wires) {
+        List<NeighborStep> result = new ArrayList<>();
+        for (Wire wire : wires) {
+            if (wire.getFrom() == component) {
+                if (wire.getTo() != null && wire.getTo() != component) {
+                    result.add(new NeighborStep(wire.getTo(), wire));
+                }
+            } else if (wire.getTo() == component) {
+                if (wire.getFrom() != null && wire.getFrom() != component) {
+                    result.add(new NeighborStep(wire.getFrom(), wire));
+                }
+            }
+        }
+        return result;
     }
 
     private static boolean touchesRail(Component component, List<Wire> wires, boolean plusRail) {
@@ -113,27 +146,24 @@ public final class PowerRailSimulator {
         return false;
     }
 
+    private static double railConnectionOhms(Component component, List<Wire> wires, boolean plusRail) {
+        double sum = 0;
+        for (Wire wire : wires) {
+            if (wire.getFrom() == component && isTargetRail(wire.getToAnchor(), plusRail)) {
+                sum += wire.getResistanceOhms();
+            }
+            if (wire.getTo() == component && isTargetRail(wire.getFromAnchor(), plusRail)) {
+                sum += wire.getResistanceOhms();
+            }
+        }
+        return sum;
+    }
+
     private static boolean isTargetRail(WireAnchor anchor, boolean plusRail) {
         if (anchor == null) {
             return false;
         }
         return plusRail ? anchor.isRailPlus() : anchor.isRailMinus();
-    }
-
-    private static List<Component> neighbors(Component component, List<Wire> wires) {
-        List<Component> result = new ArrayList<>();
-        for (Wire wire : wires) {
-            if (wire.getFrom() == component) {
-                if (wire.getTo() != null && wire.getTo() != component) {
-                    result.add(wire.getTo());
-                }
-            } else if (wire.getTo() == component) {
-                if (wire.getFrom() != null && wire.getFrom() != component) {
-                    result.add(wire.getFrom());
-                }
-            }
-        }
-        return result;
     }
 
     private static boolean passesCurrent(Component component) {
@@ -153,7 +183,6 @@ public final class PowerRailSimulator {
         return 0;
     }
 
-    /** Есть ли физическое соединение LED с обеими шинами (без учёта кнопок/таймера). */
     public static boolean isTopologicallyBetweenRails(LED led, List<Wire> wires) {
         if (led == null) {
             return false;
@@ -172,7 +201,8 @@ public final class PowerRailSimulator {
             if (touchesRail(current, wires, plusRail)) {
                 return true;
             }
-            for (Component next : neighbors(current, wires)) {
+            for (NeighborStep step : wireNeighbors(current, wires)) {
+                Component next = step.component();
                 if (next instanceof ArduinoUNO || visited.contains(next)) {
                     continue;
                 }
@@ -183,8 +213,5 @@ public final class PowerRailSimulator {
             }
         }
         return false;
-    }
-
-    private record State(Component component, double ohms, Set<Component> visited, boolean seenLed) {
     }
 }

@@ -59,28 +59,25 @@ public class FirebaseService {
         return urlBuilder.toString();
     }
 
-    public void saveCircuit(Circuit circuit, String userId, String idToken) throws IOException {
-        if (circuit == null || circuit.getName() == null || circuit.getName().isEmpty()) {
+    /** Сохраняет схему в том же JSON-формате, что и локальный файл (name, components[], wires[]). */
+    public void saveCircuit(JsonObject circuitJson, String userId, String idToken) throws IOException {
+        if (circuitJson == null || !circuitJson.has("name") || circuitJson.get("name").isJsonNull()) {
+            throw new IllegalArgumentException("Имя схемы не может быть пустым");
+        }
+        String name = circuitJson.get("name").getAsString();
+        if (name.isEmpty()) {
             throw new IllegalArgumentException("Имя схемы не может быть пустым");
         }
         if (userId == null || userId.isEmpty() || idToken == null || idToken.isEmpty()) {
             throw new IllegalStateException("Пользователь не авторизован");
         }
 
-        JsonObject json = new JsonObject();
-        json.addProperty("name", circuit.getName());
-
-        JsonObject circuitData = new JsonObject();
-        circuitData.add("components", gson.toJsonTree(circuit.getComponentsData()));
-        circuitData.add("wires", gson.toJsonTree(circuit.getWiresData()));
-        json.add("components", circuitData);
-
-        String encodedName = URLEncoder.encode(circuit.getName(), StandardCharsets.UTF_8);
+        String encodedName = URLEncoder.encode(name, StandardCharsets.UTF_8);
 
         String url = buildUserPath(userId, "circuits/" + encodedName + ".json", idToken);
 
         RequestBody body = RequestBody.create(
-            json.toString(),
+            circuitJson.toString(),
             MediaType.get("application/json; charset=utf-8")
         );
 

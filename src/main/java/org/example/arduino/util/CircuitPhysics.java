@@ -8,12 +8,15 @@ public final class CircuitPhysics {
     public static final double LED_VF = 2.0;
     public static final double LED_I_NOM_MA = 20.0;
     public static final double LED_I_MAX_MA = 30.0;
+    /** Минимальный ток, при котором LED визуально «горит» в симуляции. */
+    public static final double LED_I_MIN_GLOW_MA = 1.0;
 
     public enum SafetyLevel {
         NO_RESISTOR("Нет ограничения тока — LED может перегореть", "#C0392B"),
         OVERLOAD("Перегрузка — ток выше безопасного предела", "#E74C3C"),
         HIGH("Повышенный ток — лучше увеличить резистор", "#F39C12"),
-        NORMAL("Ток в норме для светодиода", "#27AE60");
+        NORMAL("Ток в норме для светодиода", "#27AE60"),
+        TOO_LOW("Ток слишком мал — LED не светится", "#7F8C8D");
 
         private final String message;
         private final String color;
@@ -81,11 +84,29 @@ public final class CircuitPhysics {
                     supplyV, ledVf
                 );
             }
+            if (supplyV <= ledVf || currentMa <= 0) {
+                return String.format(
+                    "U (%.1f В) ≤ V_LED (%.1f В) → LED не светится, I ≈ 0 мА",
+                    supplyV, ledVf
+                );
+            }
             String iStr = Double.isInfinite(currentMa) ? "∞" : String.format("%.2f", currentMa);
             return String.format(
                 "I = (U − V_LED) / R%n  = (%.1f − %.1f) / %.0f%n  = %s мА",
                 supplyV, ledVf, resistorOhms, iStr
             );
+        }
+
+        /** Одна строка — для строки статуса вверху окна (без переносов). */
+        public String formulaOneLine() {
+            if (resistorOhms <= 0) {
+                return String.format("I = (%.1f − %.1f) / 0 → ∞ мА", supplyV, ledVf);
+            }
+            if (supplyV <= ledVf || currentMa <= 0) {
+                return String.format("U (%.1f В) ≤ V_LED → LED не светится", supplyV);
+            }
+            String iStr = Double.isInfinite(currentMa) ? "∞" : String.format("%.1f", currentMa);
+            return String.format("I = (%.1f − %.1f) / %.0f = %s мА", supplyV, ledVf, resistorOhms, iStr);
         }
     }
 
@@ -115,6 +136,11 @@ public final class CircuitPhysics {
         return currentMa > LED_I_MAX_MA;
     }
 
+    /** LED «горит» только если ток достаточный (I = (U − V_LED) / R ≥ порога). */
+    public static boolean isLedGlowing(double currentMa) {
+        return !Double.isInfinite(currentMa) && currentMa >= LED_I_MIN_GLOW_MA;
+    }
+
     public static String shortStatus(double currentMa) {
         if (Double.isInfinite(currentMa) || currentMa <= 0) {
             return "ток: опасно (нет резистора)";
@@ -127,13 +153,16 @@ public final class CircuitPhysics {
             return SafetyLevel.NO_RESISTOR;
         }
         if (currentMa <= 0) {
-            return SafetyLevel.NO_RESISTOR;
+            return SafetyLevel.TOO_LOW;
         }
         if (currentMa > LED_I_MAX_MA) {
             return SafetyLevel.OVERLOAD;
         }
         if (currentMa > LED_I_NOM_MA) {
             return SafetyLevel.HIGH;
+        }
+        if (currentMa < LED_I_MIN_GLOW_MA) {
+            return SafetyLevel.TOO_LOW;
         }
         return SafetyLevel.NORMAL;
     }

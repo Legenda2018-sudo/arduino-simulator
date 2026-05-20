@@ -1,6 +1,7 @@
 package org.example.arduino;
 
 import javafx.application.Platform;
+import org.example.arduino.model.Component;
 import org.example.arduino.model.ArduinoUNO;
 import org.example.arduino.model.Button;
 import org.example.arduino.model.LED;
@@ -127,6 +128,13 @@ class ComponentModelTest {
     }
 
     @Test
+    void circuitPhysicsMegaOhmTooLow() {
+        CircuitPhysics.CalcResult r = CircuitPhysics.analyze(1_000_000);
+        assertEquals(CircuitPhysics.SafetyLevel.TOO_LOW, r.getSafety());
+        assertFalse(CircuitPhysics.isLedGlowing(r.getCurrentMa()));
+    }
+
+    @Test
     void circuitPhysicsOverloadWithoutResistor() {
         CircuitPhysics.CalcResult r = CircuitPhysics.analyze(1);
         assertEquals(CircuitPhysics.SafetyLevel.OVERLOAD, r.getSafety());
@@ -143,7 +151,7 @@ class ComponentModelTest {
         PowerRailSimulator.PowerResult path = PowerRailSimulator.analyzeLedPowerPath(
             led, List.of(led), wires);
         assertTrue(path.closed());
-        assertEquals(1.0, path.seriesOhms(), 0.01);
+        assertEquals(wires.stream().mapToDouble(Wire::getResistanceOhms).sum(), path.seriesOhms(), 0.01);
     }
 
     @Test
@@ -174,6 +182,36 @@ class ComponentModelTest {
         PowerRailSimulator.PowerResult path = PowerRailSimulator.analyzeLedPowerPath(
             led, List.of(resistor, led), wires);
         assertTrue(path.closed());
-        assertEquals(220.0, path.seriesOhms(), 0.01);
+        assertEquals(220.0 + wires.stream().mapToDouble(Wire::getResistanceOhms).sum(), path.seriesOhms(), 0.01);
+    }
+
+    @Test
+    void componentFootprintsMatchVisualBounds() {
+        assertEquals(34, new Resistor(0, 0).getFootprint().halfWidth(), 0.01);
+        assertEquals(10, new Resistor(0, 0).getFootprint().halfHeight(), 0.01);
+        assertEquals(52, new ArduinoUNO(0, 0).getFootprint().halfWidth(), 0.01);
+        assertEquals(28, new ArduinoUNO(0, 0).getFootprint().halfHeight(), 0.01);
+        assertEquals(18, new LED(0, 0).getFootprint().halfWidth(), 0.01);
+        assertEquals(28, new Button(0, 0).getFootprint().halfWidth(), 0.01);
+        assertEquals(36, new Timer(0, 0).getFootprint().halfWidth(), 0.01);
+    }
+
+    @Test
+    void resistorPlacementGapFromDiagnosticLayout() {
+        Resistor left = new Resistor(800, 160);
+        Resistor right = new Resistor(886, 160);
+        assertFalse(footprintsOverlap(left, right, 10));
+        Resistor tooClose = new Resistor(860, 160);
+        assertTrue(footprintsOverlap(left, tooClose, 10));
+    }
+
+    private static boolean footprintsOverlap(
+            org.example.arduino.model.Component first,
+            org.example.arduino.model.Component second,
+            double gap) {
+        Component.Footprint f1 = first.getFootprint();
+        Component.Footprint f2 = second.getFootprint();
+        return Math.abs(first.getX() - second.getX()) < f1.halfWidth() + f2.halfWidth() + gap
+            && Math.abs(first.getY() - second.getY()) < f1.halfHeight() + f2.halfHeight() + gap;
     }
 }

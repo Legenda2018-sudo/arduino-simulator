@@ -3,8 +3,6 @@ package org.example.arduino.model;
 import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.Circle;
-import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.Shape;
 import java.util.ArrayList;
 import java.util.List;
@@ -96,26 +94,18 @@ public abstract class Component {
     }
 
     public boolean contains(double x, double y) {
-        if (shape == null) {
-            return false;
-        }
-        double dx = x - this.x;
-        double dy = y - this.y;
-        double distance = Math.sqrt(dx * dx + dy * dy);
+        Footprint fp = getFootprint();
+        double dx = Math.abs(x - this.x);
+        double dy = Math.abs(y - this.y);
+        return dx <= fp.halfWidth() + 2 && dy <= fp.halfHeight() + 2;
+    }
 
-        if (shape instanceof Group) {
-            return distance <= 40;
-        }
-        if (shape instanceof Circle) {
-            Circle circle = (Circle) shape;
-            return distance <= circle.getRadius() + 5;
-        }
-        if (shape instanceof Rectangle) {
-            Rectangle rect = (Rectangle) shape;
-            return Math.abs(dx) <= rect.getWidth() / 2 + 5
-                && Math.abs(dy) <= rect.getHeight() / 2 + 5;
-        }
-        return false;
+    /** Прямоугольная область занятости на плате (совпадает с кликом и превью). */
+    public Footprint getFootprint() {
+        return new Footprint(25, 12);
+    }
+
+    public record Footprint(double halfWidth, double halfHeight) {
     }
 
     protected abstract void updateShape();

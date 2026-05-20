@@ -159,8 +159,8 @@ public class Timer extends Component {
     }
 
     @Override
-    public boolean contains(double px, double py) {
-        return Math.abs(px - x) <= 38 && Math.abs(py - y) <= 18;
+    public Footprint getFootprint() {
+        return new Footprint(36, 16);
     }
 
     public String getStatusText() {

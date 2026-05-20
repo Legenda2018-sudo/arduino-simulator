@@ -18,6 +18,12 @@
     -fx-font-size: 12px;
 }
 
+.status-label {
+    -fx-text-fill: #bdc3c7;
+    -fx-font-size: 12px;
+    -fx-padding: 0 0 2 0;
+}
+
 .sidebar {
     -fx-background-color: #252a31;
 }

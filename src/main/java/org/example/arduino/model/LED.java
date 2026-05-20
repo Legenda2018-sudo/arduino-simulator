@@ -66,6 +66,15 @@ public class LED extends Component {
             circle.setEffect(null);
         }
     }
+
+    /** Сброс после перегорания (если схема снова безопасна). */
+    public void resetBurn() {
+        if (!isBurned) {
+            return;
+        }
+        this.isBurned = false;
+        setOn(false);
+    }
     
     public boolean isBurned() {
         return isBurned;
@@ -92,6 +101,11 @@ public class LED extends Component {
     @Override
     public String getType() {
         return "LED";
+    }
+
+    @Override
+    public Footprint getFootprint() {
+        return new Footprint(18, 18);
     }
 }
 

@@ -200,13 +200,11 @@ public class ArduinoUNO extends Component {
      * Устанавливает вход на пине (INPUT режим)
      */
     public void setPinInput(int pin, boolean value) {
-        if (!isPowered) return;
-        
-        if (pin >= 0 && pin <= 13) {
-            if (!pinModes.getOrDefault(pin, true)) { // Только если режим INPUT
-                // В реальном Arduino мы бы читали состояние пина
-                // Здесь просто сохраняем для симуляции
-            }
+        if (!isPowered || pin < 0 || pin > 13) {
+            return;
+        }
+        if (!pinModes.getOrDefault(pin, true)) {
+            digitalPins.put(pin, value);
         }
     }
 
@@ -224,8 +222,8 @@ public class ArduinoUNO extends Component {
     }
 
     @Override
-    public boolean contains(double px, double py) {
-        return Math.abs(px - x) <= 54 && Math.abs(py - y) <= 30;
+    public Footprint getFootprint() {
+        return new Footprint(52, 28);
     }
 
     public String getStatusText() {

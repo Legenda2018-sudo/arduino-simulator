@@ -73,6 +73,14 @@ public class WireAnchor {
                 return resistor.getLeg2X();
             }
         }
+        if (component instanceof Battery battery) {
+            if (pin == 1) {
+                return battery.getMinusX();
+            }
+            if (pin == 2) {
+                return battery.getPlusX();
+            }
+        }
         if (component instanceof ArduinoUNO) {
             if (pin == 1) {
                 return component.getX() - 52;
@@ -96,6 +104,9 @@ public class WireAnchor {
         }
         if (component instanceof Resistor resistor && (pin == 1 || pin == 2)) {
             return resistor.getLegY();
+        }
+        if (component instanceof Battery battery && (pin == 1 || pin == 2)) {
+            return battery.getLegY();
         }
         return component.getY();
     }
@@ -142,6 +153,12 @@ public class WireAnchor {
         }
         if (component instanceof ArduinoUNO && pin == 2) {
             return "Arduino (правый контакт)";
+        }
+        if (component instanceof Battery && pin == 1) {
+            return "батарейка (−)";
+        }
+        if (component instanceof Battery && pin == 2) {
+            return "батарейка (+)";
         }
         return component.getType();
     }

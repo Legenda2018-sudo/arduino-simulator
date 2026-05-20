@@ -119,6 +119,11 @@ public class Resistor extends Component {
     }
 
     @Override
+    public Footprint getFootprint() {
+        return new Footprint(34, 10);
+    }
+
+    @Override
     public boolean contains(double px, double py) {
         return pinAt(px, py) >= 0;
     }

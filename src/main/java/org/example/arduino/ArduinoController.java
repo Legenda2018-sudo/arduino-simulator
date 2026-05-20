@@ -21,6 +21,7 @@ import org.example.arduino.model.BreadboardLayout;
 import org.example.arduino.model.Component;
 import org.example.arduino.model.Circuit;
 import org.example.arduino.model.LED;
+import org.example.arduino.model.Battery;
 import org.example.arduino.model.Button;
 import org.example.arduino.model.Resistor;
 import org.example.arduino.model.Wire;
@@ -29,6 +30,7 @@ import org.example.arduino.model.ArduinoUNO;
 import org.example.arduino.model.Timer;
 import org.example.arduino.service.FirebaseAuthService;
 import org.example.arduino.service.FirebaseService;
+import org.example.arduino.util.CircuitAnalyzer;
 import org.example.arduino.util.CircuitPhysics;
 import org.example.arduino.util.PowerRailSimulator;
 import org.example.arduino.util.WireSignals;
@@ -41,7 +43,9 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.ResourceBundle;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
@@ -67,6 +71,8 @@ public class ArduinoController implements Initializable {
     private javafx.scene.control.Button btnArduino;
     @FXML
     private javafx.scene.control.Button btnTimer;
+    @FXML
+    private javafx.scene.control.Button btnBattery;
     @FXML
     private javafx.scene.control.Button btnConnect;
     @FXML
@@ -104,6 +110,8 @@ public class ArduinoController implements Initializable {
     @FXML
     private Label userLabel;
     @FXML
+    private Label statusLabel;
+    @FXML
     private javafx.scene.layout.HBox authBox;
     @FXML
     private javafx.scene.layout.HBox circuitBox;
@@ -126,12 +134,16 @@ public class ArduinoController implements Initializable {
     private FirebaseAuthService firebaseAuthService;
     private volatile boolean authInProgress;
     private AnimationTimer simulationTimer;
-    private javafx.scene.shape.Shape previewShape;
+    private final List<javafx.scene.shape.Shape> previewShapes = new ArrayList<>();
     private final List<Component> selectedComponents = new ArrayList<>();
+    private final Map<Component, double[]> dragStartPositions = new IdentityHashMap<>();
     private boolean isDraggingComponents;
     private boolean suppressClickAfterDrag;
-    private double lastDragSceneX;
-    private double lastDragSceneY;
+    private Component dragLeadComponent;
+    private double dragStartSceneX;
+    private double dragStartSceneY;
+    private double dragStartLeadX;
+    private double dragStartLeadY;
     private javafx.scene.shape.Rectangle selectionRect;
     private boolean isSelectingArea;
     private double selectionStartX;
@@ -149,6 +161,8 @@ public class ArduinoController implements Initializable {
 
     private static final double BOARD_VIEW_WIDTH = BreadboardLayout.BOARD_VIEW_WIDTH;
     private static final double BOARD_VIEW_HEIGHT = BreadboardLayout.BOARD_VIEW_HEIGHT;
+    /** Минимальный зазор между компонентами (размещение и перемещение). */
+    private static final double PLACEMENT_GAP = 10;
 
     @Override
     public void initialize(URL url, ResourceBundle resourceBundle) {
@@ -461,7 +475,7 @@ public class ArduinoController implements Initializable {
                         rect.setX(comp.getX() - 25);
                         rect.setY(comp.getY() - 12);
                     }
-                } else if (comp instanceof Resistor || comp instanceof ArduinoUNO || comp instanceof Timer) {
+                } else if (comp instanceof Resistor || comp instanceof ArduinoUNO || comp instanceof Timer || comp instanceof Battery) {
                     comp.setX(comp.getX());
                 }
                 applyComponentEffects(comp);
@@ -492,6 +506,9 @@ public class ArduinoController implements Initializable {
                 shape.setOnMouseReleased(e -> {
                     e.consume();
                     isDraggingComponents = false;
+                    dragLeadComponent = null;
+                    dragStartPositions.clear();
+                    hidePreview();
                 });
                 shape.setOnMouseClicked(e -> {
                     e.consume();
@@ -567,6 +584,14 @@ public class ArduinoController implements Initializable {
             }
             return WireAnchor.component(resistor, pin);
         }
+        if (component instanceof Battery battery) {
+            int pin = event != null ? battery.pinAt(px, py) : 0;
+            if (pin == 0 || pin < 0) {
+                double refX = other != null ? other.getX() : px;
+                pin = refX < battery.getX() ? 1 : 2;
+            }
+            return WireAnchor.component(battery, pin);
+        }
         if (component instanceof ArduinoUNO) {
             int pin;
             if (other != null) {
@@ -580,52 +605,13 @@ public class ArduinoController implements Initializable {
     }
 
     @FXML
-    private void onDemoClick() {
-        if (isSimulating) {
-            onSimulateClick();
-        }
-        selectedComponentType = null;
-        isSelectingArea = false;
-        isDraggingComponents = false;
-        resetButtonStyles();
-        resetModeButtons();
-        hidePreview();
-        clearComponentSelection();
-        loadDemoCircuit();
-    }
-
-    @FXML
     private void onBreadboardMouseMoved(MouseEvent event) {
         if (selectedComponentType != null && !isConnecting && !isDeleting) {
-            double x = event.getX();
-            double y = event.getY();
-            double snappedX = Math.round((x - BOARD_HOLE_MIN_X) / BOARD_CELL) * BOARD_CELL + BOARD_HOLE_MIN_X;
-            double snappedY = Math.round((y - BOARD_HOLE_MIN_Y) / BOARD_CELL) * BOARD_CELL + BOARD_HOLE_MIN_Y;
             double[] bounds = getPlacementBoundsForType(selectedComponentType);
-            snappedX = Math.max(bounds[0], Math.min(bounds[1], snappedX));
-            snappedY = Math.max(bounds[2], Math.min(bounds[3], snappedY));
-            if (snappedX >= bounds[0] && snappedX <= bounds[1] && snappedY >= bounds[2] && snappedY <= bounds[3]) {
-                boolean canPlace = true;
-                double rNew = getPlacementRadiusForType(selectedComponentType);
-                for (Component c : components) {
-                    double rExisting = getPlacementRadius(c);
-                    double dx = snappedX - c.getX();
-                    double dy = snappedY - c.getY();
-                    double dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < rNew + rExisting + 10) {
-                        canPlace = false;
-                        break;
-                    }
-                }
-                if (canPlace) {
-                    showPreview(snappedX, snappedY);
-                } else {
-                    hidePreview();
-                }
-            } else {
-                hidePreview();
-            }
-        } else {
+            double[] snapped = snapBoardPoint(event.getX(), event.getY(), bounds);
+            boolean valid = canPlaceComponentAt(snapped[0], snapped[1], selectedComponentType);
+            showComponentPreview(snapped[0], snapped[1], selectedComponentType, valid);
+        } else if (!isDraggingComponents) {
             hidePreview();
         }
     }
@@ -773,17 +759,10 @@ public class ArduinoController implements Initializable {
             }
         }
         if (selectedComponentType != null && !isConnecting && !isDeleting) {
-            double rNew = getPlacementRadiusForType(selectedComponentType);
-            for (Component c : components) {
-                double rExisting = getPlacementRadius(c);
-                double dx = snappedX - c.getX();
-                double dy = snappedY - c.getY();
-                double dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < rNew + rExisting + 10) {
-                    updateStatus("Слишком близко к другому компоненту. Выберите другое место.");
-                    hidePreview();
-                    return;
-                }
+            if (!canPlaceComponentAt(snappedX, snappedY, selectedComponentType)) {
+                updateStatus("Слишком близко к другому компоненту. Выберите другое место.");
+                showComponentPreview(snappedX, snappedY, selectedComponentType, false);
+                return;
             }
         }
         if (selectedComponentType != null && !isConnecting && !isDeleting) {
@@ -803,6 +782,9 @@ public class ArduinoController implements Initializable {
                     break;
                 case "Timer":
                     newComponent = new Timer(snappedX, snappedY);
+                    break;
+                case "Battery":
+                    newComponent = new Battery(snappedX, snappedY);
                     break;
                 default:
                     newComponent = null;
@@ -860,56 +842,6 @@ public class ArduinoController implements Initializable {
         }
     }
 
-    private void showPreview(double x, double y) {
-        if (selectedComponentType == null) {
-            hidePreview();
-            return;
-        }
-        hidePreview();
-        javafx.scene.shape.Shape shape = null;
-
-        switch (selectedComponentType) {
-            case "LED":
-                shape = new javafx.scene.shape.Circle(x, y, 16);
-                break;
-            case "Button":
-                shape = new javafx.scene.shape.Rectangle(x - 28, y - 14, 56, 28);
-                ((javafx.scene.shape.Rectangle) shape).setArcWidth(14);
-                ((javafx.scene.shape.Rectangle) shape).setArcHeight(14);
-                break;
-            case "Resistor":
-                shape = new javafx.scene.shape.Rectangle(x - 30, y - 10, 60, 20);
-                break;
-            case "ArduinoUNO":
-                shape = new javafx.scene.shape.Rectangle(x - 52, y - 28, 104, 56);
-                break;
-            case "Timer":
-                shape = new javafx.scene.shape.Rectangle(x - 36, y - 16, 72, 32);
-                break;
-        }
-        
-        if (shape != null) {
-            shape.setFill(Color.rgb(46, 204, 113, 0.35));
-            shape.setStroke(Color.web("#27AE60"));
-            shape.setStrokeWidth(2);
-            if (shape instanceof javafx.scene.shape.Rectangle) {
-                ((javafx.scene.shape.Rectangle) shape).getStrokeDashArray().addAll(5.0, 5.0);
-            } else if (shape instanceof javafx.scene.shape.Circle) {
-                ((javafx.scene.shape.Circle) shape).getStrokeDashArray().addAll(5.0, 5.0);
-            }
-            shape.setMouseTransparent(true);
-            componentPane.getChildren().add(shape);
-            previewShape = shape;
-        }
-    }
-
-    private void hidePreview() {
-        if (previewShape != null) {
-            componentPane.getChildren().remove(previewShape);
-            previewShape = null;
-        }
-    }
-
     // ОТЧЁТ ПМ02 РИС.3 — НАЧАЛО СКРИНА (кэш выделения, клик/Ctrl, групповое перетаскивание)
     private void clearComponentSelection() {
         for (Component component : components) {
@@ -945,64 +877,102 @@ public class ArduinoController implements Initializable {
     }
 
     private void prepareSelectionForDrag(Component clicked, MouseEvent event) {
-        if (clicked == null || event == null) return;
+        if (clicked == null || event == null) {
+            return;
+        }
         boolean ctrlDown = event.isControlDown();
         if (!clicked.isSelected()) {
             if (!ctrlDown) {
                 clearComponentSelection();
             }
             clicked.setSelected(true);
-        } else if (ctrlDown) {
-            // Ctrl + клик по уже выделенному только подготавливает drag
-            // Переключение состояния делаем в onMouseClicked.
         }
         refreshSelectionCache();
         isDraggingComponents = !selectedComponents.isEmpty();
-        lastDragSceneX = event.getSceneX();
-        lastDragSceneY = event.getSceneY();
+        dragLeadComponent = clicked;
+        dragStartSceneX = event.getSceneX();
+        dragStartSceneY = event.getSceneY();
+        dragStartLeadX = clicked.getX();
+        dragStartLeadY = clicked.getY();
+        dragStartPositions.clear();
+        for (Component component : selectedComponents) {
+            dragStartPositions.put(component, new double[] { component.getX(), component.getY() });
+        }
     }
 
     private void dragSelectedComponents(MouseEvent event) {
-        if (!isDraggingComponents || selectedComponents.isEmpty() || event == null) return;
-        double rawDx = event.getSceneX() - lastDragSceneX;
-        double rawDy = event.getSceneY() - lastDragSceneY;
-        if (Math.abs(rawDx) < 0.01 && Math.abs(rawDy) < 0.01) {
+        if (!isDraggingComponents || selectedComponents.isEmpty() || event == null || dragLeadComponent == null) {
             return;
         }
+        double totalDx = event.getSceneX() - dragStartSceneX;
+        double totalDy = event.getSceneY() - dragStartSceneY;
+        if (Math.abs(totalDx) < 0.01 && Math.abs(totalDy) < 0.01) {
+            return;
+        }
+
+        double[] leadBounds = getPlacementBoundsForComponent(dragLeadComponent);
+        double[] snappedLead = snapBoardPoint(dragStartLeadX + totalDx, dragStartLeadY + totalDy, leadBounds);
+        double dx = snappedLead[0] - dragStartLeadX;
+        double dy = snappedLead[1] - dragStartLeadY;
 
         double minDx = Double.NEGATIVE_INFINITY;
         double maxDx = Double.POSITIVE_INFINITY;
         double minDy = Double.NEGATIVE_INFINITY;
         double maxDy = Double.POSITIVE_INFINITY;
         for (Component component : selectedComponents) {
+            double[] start = dragStartPositions.get(component);
+            if (start == null) {
+                continue;
+            }
             double[] bounds = getPlacementBoundsForComponent(component);
-            minDx = Math.max(minDx, bounds[0] - component.getX());
-            maxDx = Math.min(maxDx, bounds[1] - component.getX());
-            minDy = Math.max(minDy, bounds[2] - component.getY());
-            maxDy = Math.min(maxDy, bounds[3] - component.getY());
+            minDx = Math.max(minDx, bounds[0] - start[0]);
+            maxDx = Math.min(maxDx, bounds[1] - start[0]);
+            minDy = Math.max(minDy, bounds[2] - start[1]);
+            maxDy = Math.min(maxDy, bounds[3] - start[1]);
         }
+        dx = Math.max(minDx, Math.min(maxDx, dx));
+        dy = Math.max(minDy, Math.min(maxDy, dy));
 
-        double dx = Math.max(minDx, Math.min(maxDx, rawDx));
-        double dy = Math.max(minDy, Math.min(maxDy, rawDy));
-        if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) {
-            lastDragSceneX = event.getSceneX();
-            lastDragSceneY = event.getSceneY();
-            return;
-        }
-        if (!canMoveSelectionBy(dx, dy)) {
+        if (!canMoveSelectionTo(dx, dy)) {
+            showMovePreview(dx, dy, false);
             return;
         }
 
+        hidePreview();
         for (Component component : selectedComponents) {
-            component.setX(component.getX() + dx);
-            component.setY(component.getY() + dy);
+            double[] start = dragStartPositions.get(component);
+            if (start == null) {
+                continue;
+            }
+            component.setX(start[0] + dx);
+            component.setY(start[1] + dy);
+            updateComponentShapePosition(component);
         }
         for (Wire wire : wires) {
             wire.updateLine();
         }
         suppressClickAfterDrag = true;
-        lastDragSceneX = event.getSceneX();
-        lastDragSceneY = event.getSceneY();
+    }
+
+    private void updateComponentShapePosition(Component comp) {
+        Node shape = comp.getShape();
+        if (shape == null) {
+            return;
+        }
+        if (shape instanceof javafx.scene.shape.Circle circle) {
+            circle.setCenterX(comp.getX());
+            circle.setCenterY(comp.getY());
+        } else if (shape instanceof javafx.scene.shape.Rectangle rect && !(comp instanceof Resistor)) {
+            if (comp instanceof Button) {
+                rect.setX(comp.getX() - 28);
+                rect.setY(comp.getY() - 14);
+            } else {
+                rect.setX(comp.getX() - 25);
+                rect.setY(comp.getY() - 12);
+            }
+        } else if (comp instanceof Resistor || comp instanceof ArduinoUNO || comp instanceof Timer || comp instanceof Battery) {
+            comp.setX(comp.getX());
+        }
     }
     // ОТЧЁТ ПМ02 РИС.3 — КОНЕЦ СКРИНА (кэш выделения, клик/Ctrl, групповое перетаскивание)
 
@@ -1015,25 +985,194 @@ public class ArduinoController implements Initializable {
         if (component instanceof Resistor) return getPlacementBoundsForType("Resistor");
         if (component instanceof ArduinoUNO) return getPlacementBoundsForType("ArduinoUNO");
         if (component instanceof Timer) return getPlacementBoundsForType("Timer");
+        if (component instanceof Battery) return getPlacementBoundsForType("Battery");
         return getPlacementBoundsForType(null);
     }
 
-    private boolean canMoveSelectionBy(double dx, double dy) {
+    private boolean canMoveSelectionTo(double dx, double dy) {
         for (Component moving : selectedComponents) {
-            double newX = moving.getX() + dx;
-            double newY = moving.getY() + dy;
-            double rMoving = getPlacementRadius(moving);
-            for (Component other : components) {
-                if (selectedComponents.contains(other)) {
-                    continue;
-                }
-                double dist = Math.hypot(newX - other.getX(), newY - other.getY());
-                if (dist < rMoving + getPlacementRadius(other)) {
-                    return false;
-                }
+            double[] start = dragStartPositions.get(moving);
+            if (start == null) {
+                continue;
+            }
+            if (!canPlaceComponentAt(start[0] + dx, start[1] + dy, moving, selectedComponents)) {
+                return false;
             }
         }
         return true;
+    }
+
+    private double[] snapBoardPoint(double x, double y, double[] bounds) {
+        double snappedX = Math.round((x - BOARD_HOLE_MIN_X) / BOARD_CELL) * BOARD_CELL + BOARD_HOLE_MIN_X;
+        double snappedY = Math.round((y - BOARD_HOLE_MIN_Y) / BOARD_CELL) * BOARD_CELL + BOARD_HOLE_MIN_Y;
+        snappedX = Math.max(bounds[0], Math.min(bounds[1], snappedX));
+        snappedY = Math.max(bounds[2], Math.min(bounds[3], snappedY));
+        return new double[] { snappedX, snappedY };
+    }
+
+    private boolean canPlaceComponentAt(double x, double y, String type) {
+        return canPlaceComponentAt(x, y, type, List.of());
+    }
+
+    private boolean canPlaceComponentAt(double x, double y, Component component, List<Component> ignore) {
+        if (component == null) {
+            return false;
+        }
+        double[] bounds = getPlacementBoundsForComponent(component);
+        if (x < bounds[0] || x > bounds[1] || y < bounds[2] || y > bounds[3]) {
+            return false;
+        }
+        return !collidesWithOthers(x, y, footprintOf(component), ignore);
+    }
+
+    private boolean canPlaceComponentAt(double x, double y, String type, List<Component> ignore) {
+        double[] bounds = getPlacementBoundsForType(type);
+        if (x < bounds[0] || x > bounds[1] || y < bounds[2] || y > bounds[3]) {
+            return false;
+        }
+        return !collidesWithOthers(x, y, footprintForType(type), ignore);
+    }
+
+    private boolean collidesWithOthers(double x, double y, Component.Footprint footprint, List<Component> ignore) {
+        for (Component other : components) {
+            if (ignore != null && ignore.contains(other)) {
+                continue;
+            }
+            if (footprintsOverlap(x, y, footprint, other.getX(), other.getY(), footprintOf(other), PLACEMENT_GAP)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean footprintsOverlap(
+            double x1, double y1, Component.Footprint first,
+            double x2, double y2, Component.Footprint second,
+            double gap) {
+        return Math.abs(x1 - x2) < first.halfWidth() + second.halfWidth() + gap
+            && Math.abs(y1 - y2) < first.halfHeight() + second.halfHeight() + gap;
+    }
+
+    private Component.Footprint footprintOf(Component component) {
+        return component != null ? component.getFootprint() : new Component.Footprint(25, 12);
+    }
+
+    private Component.Footprint footprintForType(String type) {
+        if (type == null) {
+            return new Component.Footprint(25, 12);
+        }
+        return switch (type) {
+            case "LED" -> new Component.Footprint(18, 18);
+            case "Button" -> new Component.Footprint(28, 14);
+            case "Resistor" -> new Component.Footprint(34, 10);
+            case "ArduinoUNO" -> new Component.Footprint(52, 28);
+            case "Timer" -> new Component.Footprint(36, 16);
+            case "Battery" -> new Component.Footprint(38, 16);
+            default -> new Component.Footprint(25, 12);
+        };
+    }
+
+    private String componentTypeKey(Component component) {
+        if (component instanceof LED) {
+            return "LED";
+        }
+        if (component instanceof Button) {
+            return "Button";
+        }
+        if (component instanceof Resistor) {
+            return "Resistor";
+        }
+        if (component instanceof ArduinoUNO) {
+            return "ArduinoUNO";
+        }
+        if (component instanceof Timer) {
+            return "Timer";
+        }
+        if (component instanceof Battery) {
+            return "Battery";
+        }
+        return null;
+    }
+
+    private javafx.scene.shape.Shape createPreviewShape(String type, double x, double y) {
+        if (type == null) {
+            return null;
+        }
+        return switch (type) {
+            case "LED" -> new javafx.scene.shape.Circle(x, y, 16);
+            case "Button" -> {
+                javafx.scene.shape.Rectangle rect = new javafx.scene.shape.Rectangle(x - 28, y - 14, 56, 28);
+                rect.setArcWidth(14);
+                rect.setArcHeight(14);
+                yield rect;
+            }
+            case "Resistor" -> new javafx.scene.shape.Rectangle(x - 34, y - 10, 68, 20);
+            case "ArduinoUNO" -> new javafx.scene.shape.Rectangle(x - 52, y - 28, 104, 56);
+            case "Timer" -> new javafx.scene.shape.Rectangle(x - 36, y - 16, 72, 32);
+            case "Battery" -> new javafx.scene.shape.Rectangle(x - 38, y - 16, 76, 32);
+            default -> null;
+        };
+    }
+
+    private void stylePreviewShape(javafx.scene.shape.Shape shape, boolean valid) {
+        if (valid) {
+            shape.setFill(Color.rgb(46, 204, 113, 0.35));
+            shape.setStroke(Color.web("#27AE60"));
+        } else {
+            shape.setFill(Color.rgb(231, 76, 60, 0.4));
+            shape.setStroke(Color.web("#E74C3C"));
+        }
+        shape.setStrokeWidth(2.5);
+        if (shape instanceof javafx.scene.shape.Rectangle rect) {
+            rect.getStrokeDashArray().setAll(5.0, 5.0);
+        } else if (shape instanceof javafx.scene.shape.Circle circle) {
+            circle.getStrokeDashArray().setAll(5.0, 5.0);
+        }
+        shape.setMouseTransparent(true);
+    }
+
+    private void showComponentPreview(double x, double y, String type, boolean valid) {
+        hidePreview();
+        javafx.scene.shape.Shape shape = createPreviewShape(type, x, y);
+        if (shape == null) {
+            return;
+        }
+        stylePreviewShape(shape, valid);
+        previewShapes.add(shape);
+        componentPane.getChildren().add(shape);
+    }
+
+    private void showMovePreview(double dx, double dy, boolean valid) {
+        hidePreview();
+        for (Component component : selectedComponents) {
+            double[] start = dragStartPositions.get(component);
+            if (start == null) {
+                continue;
+            }
+            String type = componentTypeKey(component);
+            javafx.scene.shape.Shape shape = createPreviewShape(type, start[0] + dx, start[1] + dy);
+            if (shape == null) {
+                continue;
+            }
+            stylePreviewShape(shape, valid);
+            previewShapes.add(shape);
+            componentPane.getChildren().add(shape);
+        }
+    }
+
+    private void showPreview(double x, double y) {
+        if (selectedComponentType == null) {
+            hidePreview();
+            return;
+        }
+        showComponentPreview(x, y, selectedComponentType, true);
+    }
+
+    private void hidePreview() {
+        for (javafx.scene.shape.Shape shape : previewShapes) {
+            componentPane.getChildren().remove(shape);
+        }
+        previewShapes.clear();
     }
     
     private void handleComponentInteraction(Component clicked, MouseEvent event) {
@@ -1070,12 +1209,15 @@ public class ArduinoController implements Initializable {
                 }
             } else if (clicked instanceof Resistor) {
                 Resistor resistor = (Resistor) clicked;
+                double previewOhms = CircuitAnalyzer.parallelGroupOhms(resistor, components, wires);
                 double iMa = CircuitPhysics.currentMilliAmps(
-                    CircuitPhysics.SUPPLY_V, resistor.getResistance(), CircuitPhysics.LED_VF);
-                updateStatus("⚡ Резистор " + String.format("%.0f", resistor.getResistance()) + " Ом ("
-                    + resistor.getColorCodeText() + "). " + CircuitPhysics.shortStatus(iMa));
+                    CircuitPhysics.SUPPLY_V, previewOhms, CircuitPhysics.LED_VF);
+                String parallelNote = Math.abs(previewOhms - resistor.getResistance()) > 0.5
+                    ? String.format(", в цепи R≈%.0f Ом", previewOhms) : "";
+                updateStatus("⚡ Резистор " + String.format("%.0f", resistor.getResistance()) + " Ом"
+                    + parallelNote + " (" + resistor.getColorCodeText() + "). " + CircuitPhysics.shortStatus(iMa));
                 if (event != null && event.getClickCount() >= 2 && wasSelected) {
-                    ResistorConfigWindow.showConfig(resistor);
+                    ResistorConfigWindow.showConfig(resistor, components, wires);
                 }
             } else if (clicked instanceof ArduinoUNO) {
                 ArduinoUNO arduino = (ArduinoUNO) clicked;
@@ -1095,6 +1237,12 @@ public class ArduinoController implements Initializable {
                 updateStatus(timer.getStatusText());
                 if (event != null && event.getClickCount() >= 2 && wasSelected) {
                     TimerConfigWindow.showConfig(timer);
+                }
+            } else if (clicked instanceof Battery) {
+                Battery battery = (Battery) clicked;
+                updateStatus(String.format("🔋 Батарейка %.1f В — двойной клик для настройки", battery.getVoltage()));
+                if (event != null && event.getClickCount() >= 2 && wasSelected) {
+                    BatteryConfigWindow.showConfig(battery);
                 }
             } else {
                 updateStatus("⚡ " + clicked.getType() + " выбран");
@@ -1340,6 +1488,23 @@ public class ArduinoController implements Initializable {
         }
         setupComponentPane();
     }
+
+    @FXML
+    private void onBatteryClick() {
+        if (isSimulating) {
+            onSimulateClick();
+            updateStatus("Симуляция остановлена. Выберите место на макетной плате для батарейки");
+        }
+        selectedComponentType = "Battery";
+        isConnecting = false;
+        isDeleting = false;
+        resetModeButtons();
+        updateButtonStyle(btnBattery);
+        if (!isSimulating) {
+            updateStatus("Выберите место на макетной плате для батарейки (+/− клеммы)");
+        }
+        setupComponentPane();
+    }
     
     private void resetModeButtons() {
         setToolButtonActive(btnConnect, false, false);
@@ -1471,26 +1636,42 @@ public class ArduinoController implements Initializable {
         if (wires == null || wires.isEmpty()) {
             return "Эта схема работать не будет. Соедините компоненты проводами (кнопка «Соединить»).";
         }
-        boolean hasSource = false;
         boolean hasLed = false;
         for (Component comp : components) {
-            if (comp instanceof Button || comp instanceof Timer) {
-                hasSource = true;
-            }
-            if (comp instanceof ArduinoUNO) {
-                hasSource = true;
-            }
             if (comp instanceof LED) {
                 hasLed = true;
+                break;
             }
-        }
-        if (!hasSource) {
-            return "Эта схема работать не будет. Нужен источник сигнала: кнопка, таймер или Arduino.";
         }
         if (!hasLed) {
             return "Эта схема работать не будет. Добавьте нагрузку (например, LED).";
         }
-        // Есть ли путь от источника к LED по проводам?
+
+        // Шины +5V и GND — полноценный источник питания (замкнутый контур через LED)
+        for (Component comp : components) {
+            if (comp instanceof LED led && PowerRailSimulator.isTopologicallyBetweenRails(led, wires)) {
+                return null;
+            }
+        }
+
+        boolean hasLogicSource = false;
+        for (Component comp : components) {
+            if (comp instanceof Button || comp instanceof Timer || comp instanceof ArduinoUNO) {
+                hasLogicSource = true;
+                break;
+            }
+        }
+
+        if (!hasLogicSource) {
+            if (hasWireToRail(true) || hasWireToRail(false)) {
+                return "Эта схема работать не будет. Для шин +5V/GND нужен замкнутый контур: "
+                    + "LED соедините и с +5V, и с GND (через резистор ~220 Ом).";
+            }
+            return "Эта схема работать не будет. Нужно питание: шины +5V/GND (замкнутый контур) "
+                + "или Arduino UNO. Кнопка и таймер — переключатели, сами питание не дают.";
+        }
+
+        // Есть ли путь от логического источника к LED по проводам?
         java.util.Set<Component> reachableFromSources = new java.util.HashSet<>();
         for (Component comp : components) {
             if (comp instanceof Button || comp instanceof Timer || comp instanceof ArduinoUNO) {
@@ -1528,16 +1709,24 @@ public class ArduinoController implements Initializable {
         }
         for (Component comp : components) {
             if (comp instanceof LED && reachableFromSources.contains(comp)) {
-                return null; // есть путь от источника до LED — схема может работать
-            }
-        }
-        for (Component comp : components) {
-            if (comp instanceof LED led && PowerRailSimulator.isTopologicallyBetweenRails(led, wires)) {
                 return null;
             }
         }
-        return "Эта схема работать не будет. Соедините источник сигнала (кнопка, таймер или Arduino) с LED проводами "
-            + "или соберите цепь через шины +5V и GND (с резистором для LED).";
+        return "Эта схема работать не будет. Соедините LED с питанием (шины +5V/GND или Arduino) "
+            + "или через цепь с кнопкой/таймером (они только замыкают сигнал, питание даёт Arduino).";
+    }
+
+    private boolean hasWireToRail(boolean plusRail) {
+        for (Wire wire : wires) {
+            if (plusRail) {
+                if (wire.getFromAnchor().isRailPlus() || wire.getToAnchor().isRailPlus()) {
+                    return true;
+                }
+            } else if (wire.getFromAnchor().isRailMinus() || wire.getToAnchor().isRailMinus()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @FXML
@@ -1606,7 +1795,6 @@ public class ArduinoController implements Initializable {
                 updateAuthUi();
                 loadCircuitListAsync();
                 updateStatus("Аккаунт создан и выполнен вход как " + currentUserEmail);
-                offerDemoCircuitAfterRegister();
             },
             e -> {
                 showAlert("Ошибка регистрации", "Не удалось создать аккаунт: " + e.getMessage());
@@ -1745,128 +1933,50 @@ public class ArduinoController implements Initializable {
      * Цепь UNO -> Кнопка -> Таймер -> LED: при отжатой кнопке таймер и LED не получают питание.
      */
     private boolean hasActivePathFromArduinoTo(Component target) {
-        if (target == null) return false;
-        java.util.Queue<Component> queue = new java.util.LinkedList<>();
-        java.util.Set<Component> visited = new java.util.HashSet<>();
-        for (Component comp : components) {
-            if (comp instanceof ArduinoUNO) {
-                ArduinoUNO arduino = (ArduinoUNO) comp;
-                if (arduino.isPowered()) {
-                    queue.add(arduino);
-                    visited.add(arduino);
-                }
-            }
-        }
-        while (!queue.isEmpty()) {
-            Component current = queue.poll();
-            if (current == target) return true;
-            // Через таймер сигнал идёт только когда таймер выдаёт выход
-            if (current instanceof Timer) {
-                if (!((Timer) current).getOutput()) continue;
-            }
-            // Через кнопку сигнал идёт только когда кнопка нажата
-            if (current instanceof Button) {
-                if (!((Button) current).isPressed()) continue;
-            }
-            for (Wire wire : wires) {
-                Component next = null;
-                if (wire.getFrom() == current) next = wire.getTo();
-                else if (wire.getTo() == current) next = wire.getFrom();
-                if (next != null && !visited.contains(next)) {
-                    visited.add(next);
-                    queue.add(next);
-                }
-            }
-            for (Component connected : current.getConnections()) {
-                if (!visited.contains(connected)) {
-                    visited.add(connected);
-                    queue.add(connected);
-                }
-            }
-        }
-        return false;
+        return CircuitAnalyzer.hasPathFromArduino(target, components, wires);
     }
 
-    private void checkOverload(Component source, String sourceName) {
-        // Подсчитываем уникальные LED, подключённые к источнику (без двойного учёта wire+connection)
-        java.util.Set<Component> ledsWithoutResistor = new java.util.HashSet<>();
-        boolean hasResistor = false;
-        
-        for (Wire wire : wires) {
-            if (wire.getFrom() == source) {
-                if (wire.getTo() instanceof LED) {
-                    ledsWithoutResistor.add(wire.getTo());
-                } else if (wire.getTo() instanceof Resistor) {
-                    for (Wire w2 : wires) {
-                        if (w2.getFrom() == wire.getTo() && w2.getTo() instanceof LED) {
-                            hasResistor = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if (wire.getTo() == source && wire.getFrom() instanceof LED) {
-                ledsWithoutResistor.add(wire.getFrom());
-            }
-        }
-        for (Component connected : source.getConnections()) {
-            if (connected instanceof LED) {
-                ledsWithoutResistor.add(connected);
-            } else if (connected instanceof Resistor) {
-                hasResistor = true;
-            }
-        }
-        
-        for (Component c : ledsWithoutResistor) {
-            LED led = (LED) c;
-            if (led.isBurned()) {
+    /** Замкнутая цепь и расчёт I = (U − V_LED) / R для каждого LED. */
+    private void analyzeAllLedCircuits() {
+        String bestStatus = null;
+        for (Component comp : components) {
+            if (!(comp instanceof LED led)) {
                 continue;
             }
-            double rOnPath = findResistorOhmsInPath(source, led);
-            double iMa = CircuitPhysics.currentMilliAmps(CircuitPhysics.SUPPLY_V, rOnPath, CircuitPhysics.LED_VF);
-            if (CircuitPhysics.isLedOverloaded(iMa)) {
+            CircuitAnalyzer.LedOutcome outcome = CircuitAnalyzer.computeLedOutcome(led, components, wires);
+            if (outcome == null) {
+                led.setInput(false);
+                continue;
+            }
+            if (outcome.burn()) {
                 led.burn();
-            }
-        }
-        if (!ledsWithoutResistor.isEmpty()) {
-            boolean anyBurned = ledsWithoutResistor.stream().anyMatch(c -> c instanceof LED && ((LED) c).isBurned());
-            if (anyBurned) {
-                updateStatus("⚠️ ПЕРЕГРУЗКА LED! " + CircuitPhysics.shortStatus(
-                    CircuitPhysics.currentMilliAmps(CircuitPhysics.SUPPLY_V,
-                        findResistorOhmsInPath(source, (LED) ledsWithoutResistor.iterator().next()),
-                        CircuitPhysics.LED_VF))
-                    + " — нужен резистор ~" + String.format("%.0f", CircuitPhysics.recommendedResistorOhms(
-                        CircuitPhysics.SUPPLY_V, CircuitPhysics.LED_VF, CircuitPhysics.LED_I_NOM_MA)) + " Ом");
-            }
-        }
-    }
-
-    private double findResistorOhmsInPath(Component source, LED led) {
-        for (Wire wire : wires) {
-            if (wire.getTo() == led && wire.getFrom() instanceof Resistor r) {
-                return r.getResistance();
-            }
-            if (wire.getFrom() == led && wire.getTo() instanceof Resistor r) {
-                return r.getResistance();
-            }
-        }
-        for (Wire wire : wires) {
-            if (wire.getTo() == led && wire.getFrom() instanceof Resistor r) {
-                return r.getResistance();
-            }
-        }
-        if (source != null) {
-            for (Wire w1 : wires) {
-                if (w1.getFrom() == source && w1.getTo() instanceof Resistor r) {
-                    for (Wire w2 : wires) {
-                        if (w2.getFrom() == r && w2.getTo() == led) {
-                            return r.getResistance();
-                        }
-                    }
+                led.setInput(false);
+                bestStatus = outcome.statusLine();
+            } else if (outcome.glow()) {
+                if (led.isBurned()) {
+                    led.resetBurn();
+                }
+                led.setInput(true);
+                String line = outcome.statusLine();
+                if (outcome.resistorWarning() || bestStatus == null) {
+                    bestStatus = line;
+                }
+            } else {
+                led.setInput(false);
+                if (led.isBurned() && outcome.calc().getSafety() != CircuitPhysics.SafetyLevel.OVERLOAD
+                    && outcome.calc().getSafety() != CircuitPhysics.SafetyLevel.NO_RESISTOR) {
+                    led.resetBurn();
+                }
+                String line = outcome.statusLine();
+                if (line != null && !line.isBlank()
+                    && outcome.calc().getSafety() == CircuitPhysics.SafetyLevel.TOO_LOW) {
+                    bestStatus = line;
                 }
             }
         }
-        return 1.0;
+        if (bestStatus != null && !bestStatus.isBlank()) {
+            updateStatus(bestStatus);
+        }
     }
     
     private void simulate() {
@@ -1878,29 +1988,6 @@ public class ArduinoController implements Initializable {
         for (Component comp : components) {
             if (comp instanceof LED) {
                 ((LED) comp).setInput(false);
-            }
-        }
-        
-        // Проверяем перегрузку для всех источников сигнала
-        for (Component comp : components) {
-            if (comp instanceof Button) {
-                Button button = (Button) comp;
-                if (button.isPressed()) {
-                    // Кнопка питает LED только если получает питание от Arduino (активный путь: через таймер только при его выходе)
-                    if (!hasActivePathFromArduinoTo(button)) continue;
-                    checkOverload(button, "кнопка");
-                }
-            } else if (comp instanceof Timer) {
-                Timer timer = (Timer) comp;
-                if (timer.isActive() && timer.isRunning() && timer.getOutputState()) {
-                    if (!hasActivePathFromArduinoTo(timer)) continue;
-                    checkOverload(timer, "таймер");
-                }
-            } else if (comp instanceof ArduinoUNO) {
-                ArduinoUNO arduino = (ArduinoUNO) comp;
-                if (arduino.isPowered() && arduino.getOutput()) {
-                    checkOverload(arduino, "Arduino UNO");
-                }
             }
         }
         
@@ -1948,15 +2035,7 @@ public class ArduinoController implements Initializable {
 
             boolean signal = WireSignals.readSourceSignal(fromA, from);
 
-            if (fromA.isRailPlus() && to instanceof LED) {
-                LED ledDirect = (LED) to;
-                if (!ledDirect.isBurned()) {
-                    double rPath = findResistorOhmsInPath(null, ledDirect);
-                    double iMa = CircuitPhysics.currentMilliAmps(CircuitPhysics.SUPPLY_V, rPath, CircuitPhysics.LED_VF);
-                    if (!CircuitPhysics.isLedOverloaded(iMa)) {
-                        ledDirect.setInput(true);
-                    }
-                }
+            if (fromA.isRailPlus() && to instanceof LED ledDirect) {
                 wire.setActive(!ledDirect.isBurned() && ledDirect.isOn());
                 continue;
             }
@@ -1980,26 +2059,9 @@ public class ArduinoController implements Initializable {
             if (to instanceof LED) {
                 LED led = (LED) to;
                 if (led.isBurned()) {
-                    led.setInput(false); // Перегоревший LED не работает
                     continue;
                 }
-                
-                // Несколько проводов могут вести к одному LED — объединяем сигналы по ИЛИ
-                if (from instanceof Button || from instanceof Timer) {
-                    led.setInput(led.getInput() || signal);
-                } else if (from instanceof Resistor) {
-                    Resistor r = (Resistor) from;
-                    if (r.getResistance() > 0 && r.getResistance() < 10000) {
-                        led.setInput(led.getInput() || signal);
-                    }
-                } else if (from instanceof ArduinoUNO) {
-                    ArduinoUNO arduino = (ArduinoUNO) from;
-                    if (arduino.isPowered()) {
-                        led.setInput(led.getInput() || arduino.getOutput());
-                    }
-                } else {
-                    led.setInput(led.getInput() || signal);
-                }
+                // Состояние LED — только через analyzeAllLedCircuits() и формулу I=(U−V)/R
             } else if (to instanceof ArduinoUNO) {
                 // Входной сигнал уже установлен в первом проходе
                 ArduinoUNO arduino = (ArduinoUNO) to;
@@ -2027,8 +2089,6 @@ public class ArduinoController implements Initializable {
                     signal = ((ArduinoUNO) to).isPowered() && ((ArduinoUNO) to).getOutput();
                 }
                 wire.setActive(signal);
-                LED led = (LED) from;
-                if (!led.isBurned()) led.setInput(led.getInput() || signal);
             } else if (from instanceof Resistor && (to instanceof Button || to instanceof Timer || to instanceof ArduinoUNO)) {
                 boolean signal = false;
                 if (to instanceof Button) {
@@ -2054,10 +2114,7 @@ public class ArduinoController implements Initializable {
                     if (wire.getFrom() == timer) {
                         Component to = wire.getTo();
                         wire.setActive(output);
-                        if (to instanceof LED) {
-                            LED led = (LED) to;
-                            if (!led.isBurned()) led.setInput(led.getInput() || output);
-                        } else if (to instanceof Resistor) {
+                        if (to instanceof Resistor) {
                             Resistor resistor = (Resistor) to;
                             resistor.setInput(output);
                         }
@@ -2067,10 +2124,7 @@ public class ArduinoController implements Initializable {
                 // Прямые соединения (Arduino -> Таймер -> LED)
                 for (Component connected : comp.getConnections()) {
                     if (connected instanceof ArduinoUNO) continue;
-                    if (connected instanceof LED) {
-                        LED led = (LED) connected;
-                        if (!led.isBurned()) led.setInput(led.getInput() || output);
-                    } else if (connected instanceof Resistor) {
+                    if (connected instanceof Resistor) {
                         Resistor resistor = (Resistor) connected;
                         resistor.setInput(output);
                     }
@@ -2153,10 +2207,7 @@ public class ArduinoController implements Initializable {
                         if (wire.getFrom() == arduino) {
                             Component to = wire.getTo();
                             wire.setActive(output);
-                            if (to instanceof LED) {
-                                LED led = (LED) to;
-                                if (!led.isBurned()) led.setInput(led.getInput() || output);
-                            } else if (to instanceof Resistor) {
+                            if (to instanceof Resistor) {
                                 Resistor resistor = (Resistor) to;
                                 resistor.setInput(output);
                             }
@@ -2164,10 +2215,7 @@ public class ArduinoController implements Initializable {
                     }
                     // Прямые соединения (выходы)
                     for (Component connected : comp.getConnections()) {
-                        if (connected instanceof LED) {
-                            LED led = (LED) connected;
-                            if (!led.isBurned()) led.setInput(led.getInput() || output);
-                        } else if (connected instanceof Resistor) {
+                        if (connected instanceof Resistor) {
                             Resistor resistor = (Resistor) connected;
                             resistor.setInput(output);
                         }
@@ -2198,10 +2246,7 @@ public class ArduinoController implements Initializable {
                         // К Arduino от кнопки ничего не передаём (Arduino питает кнопку)
                         continue;
                     }
-                    if (connected instanceof LED) {
-                        LED led = (LED) connected;
-                        if (!led.isBurned()) led.setInput(led.getInput() || output);
-                    } else if (connected instanceof Resistor) {
+                    if (connected instanceof Resistor) {
                         Resistor resistor = (Resistor) connected;
                         resistor.setInput(output);
                     }
@@ -2209,42 +2254,20 @@ public class ArduinoController implements Initializable {
             }
         }
         
-        // Резистор передаёт сигнал на подключённые LED (по проводам и по connections) — цепочка Кнопка–Резистор–LED работает в любом порядке создания
-        for (Component comp : components) {
-            if (comp instanceof Resistor) {
-                Resistor resistor = (Resistor) comp;
-                boolean sig = resistor.getInput();
-                for (Component connected : comp.getConnections()) {
-                    if (connected instanceof LED) {
-                        LED led = (LED) connected;
-                        if (!led.isBurned()) led.setInput(led.getInput() || sig);
-                    }
-                }
-            }
-        }
-
-        simulatePowerRailLedCircuits();
+        analyzeAllLedCircuits();
+        refreshWireActiveFromLeds();
         
         setupComponentPane();
     }
 
-    /** Цепи питания: GND → … → LED → … → +5V (закон Ома, перегрузка без резистора). */
-    private void simulatePowerRailLedCircuits() {
-        for (Component comp : components) {
-            if (!(comp instanceof LED led) || led.isBurned()) {
-                continue;
-            }
-            PowerRailSimulator.PowerResult path = PowerRailSimulator.analyzeLedPowerPath(led, components, wires);
-            if (!path.closed()) {
-                continue;
-            }
-            double iMa = CircuitPhysics.currentMilliAmps(
-                CircuitPhysics.SUPPLY_V, path.seriesOhms(), CircuitPhysics.LED_VF);
-            if (CircuitPhysics.isLedOverloaded(iMa)) {
-                led.burn();
-                led.setInput(false);
-            } else if (iMa > 0) {
-                led.setInput(true);
+    private void refreshWireActiveFromLeds() {
+        for (Wire wire : wires) {
+            Component from = wire.getFrom();
+            Component to = wire.getTo();
+            if (from instanceof LED led) {
+                wire.setActive(led.isOn() && !led.isBurned());
+            } else if (to instanceof LED led) {
+                wire.setActive(led.isOn() && !led.isBurned());
             }
         }
     }
@@ -2389,6 +2412,8 @@ public class ArduinoController implements Initializable {
                 Timer timer = (Timer) component;
                 compObj.addProperty("state", timer.isActive());
                 compObj.addProperty("interval", timer.getInterval());
+            } else if (component instanceof Battery) {
+                compObj.addProperty("voltage", ((Battery) component).getVoltage());
             }
             componentsArray.add(compObj);
         }
@@ -2490,7 +2515,11 @@ public class ArduinoController implements Initializable {
                 case "LED":
                     component = new LED(x, y);
                     if (compObj.has("state")) ((LED) component).setOn(compObj.get("state").getAsBoolean());
-                    if (compObj.has("burned") && compObj.get("burned").getAsBoolean()) ((LED) component).burn();
+                    if (compObj.has("burned") && compObj.get("burned").getAsBoolean()) {
+                        ((LED) component).burn();
+                    } else if (compObj.has("resistance") && compObj.get("resistance").getAsDouble() == 1) {
+                        ((LED) component).burn();
+                    }
                     break;
                 case "Button":
                     component = new Button(x, y);
@@ -2509,6 +2538,12 @@ public class ArduinoController implements Initializable {
                     if (compObj.has("state")) ((Timer) component).setActive(compObj.get("state").getAsBoolean());
                     if (compObj.has("interval")) ((Timer) component).setInterval((long) compObj.get("interval").getAsDouble());
                     else if (compObj.has("resistance")) ((Timer) component).setInterval((long) compObj.get("resistance").getAsDouble());
+                    break;
+                case "Battery":
+                    component = new Battery(x, y);
+                    if (compObj.has("voltage")) {
+                        ((Battery) component).setVoltage(compObj.get("voltage").getAsDouble());
+                    }
                     break;
                 default:
                     break;
@@ -2562,6 +2597,7 @@ public class ArduinoController implements Initializable {
         if (component instanceof Resistor) return "Resistor";
         if (component instanceof ArduinoUNO) return "ArduinoUNO";
         if (component instanceof Timer) return "Timer";
+        if (component instanceof Battery) return "Battery";
         return component != null ? component.getType() : "";
     }
 
@@ -2581,6 +2617,9 @@ public class ArduinoController implements Initializable {
                 return "ArduinoUNO";
             case "timer":
                 return "Timer";
+            case "battery":
+            case "бат":
+                return "Battery";
             default:
                 return rawType.trim();
         }
@@ -2620,9 +2659,14 @@ public class ArduinoController implements Initializable {
             name = "Схема " + System.currentTimeMillis();
         }
         currentCircuit.setName(name);
-        
+
+        com.google.gson.JsonObject root = new com.google.gson.JsonObject();
+        root.addProperty("name", name);
+        root.add("components", serializeComponentsToJsonArray());
+        root.add("wires", serializeWiresToJsonArray());
+
         try {
-            firebaseService.saveCircuit(currentCircuit, currentUserId, currentIdToken);
+            firebaseService.saveCircuit(root, currentUserId, currentIdToken);
             showAlert("Успех", "Схема сохранена!");
             loadCircuitList();
             updateStatus("Схема сохранена: " + name);
@@ -2705,6 +2749,27 @@ public class ArduinoController implements Initializable {
         }
     }
     
+    private com.google.gson.JsonObject normalizeCircuitRoot(com.google.gson.JsonObject obj) {
+        if (obj == null || !obj.has("components") || !obj.get("components").isJsonObject()) {
+            return obj;
+        }
+        com.google.gson.JsonObject nested = obj.getAsJsonObject("components");
+        if (!nested.has("components") && !nested.has("wires")) {
+            return obj;
+        }
+        com.google.gson.JsonObject flat = new com.google.gson.JsonObject();
+        if (obj.has("name")) {
+            flat.add("name", obj.get("name"));
+        }
+        if (nested.has("components")) {
+            flat.add("components", nested.get("components"));
+        }
+        if (nested.has("wires")) {
+            flat.add("wires", nested.get("wires"));
+        }
+        return flat;
+    }
+
     private void loadCircuitFromFirebase(String circuitName) throws Exception {
         if (!isAuthenticated()) {
             throw new IllegalStateException("Пользователь не авторизован");
@@ -2738,118 +2803,8 @@ public class ArduinoController implements Initializable {
                     return;
                 }
 
-                String name = obj.get("name").getAsString();
-
-                components.clear();
-                wires.clear();
-                componentPane.getChildren().clear();
-                wirePane.getChildren().clear();
-                selectedComponentType = null;
-                sourceComponent = null;
-                clearComponentSelection();
-                currentCircuit = new Circuit(name);
-                
-                // Парсим данные компонентов
-                if (obj.has("components") && !obj.get("components").isJsonNull()) {
-                    com.google.gson.JsonObject componentsData = obj.get("components").getAsJsonObject();
-                    
-                    if (componentsData.has("components")) {
-                        com.google.gson.JsonArray compsArray = componentsData.get("components").getAsJsonArray();
-                        
-                        for (int i = 0; i < compsArray.size(); i++) {
-                            com.google.gson.JsonObject compObj = compsArray.get(i).getAsJsonObject();
-                            if (!compObj.has("type") || !compObj.has("x") || !compObj.has("y")) continue;
-                            String type = compObj.get("type").getAsString();
-                            double x = compObj.get("x").getAsDouble();
-                            double y = compObj.get("y").getAsDouble();
-                            Component comp = null;
-                            switch (type) {
-                                case "LED":
-                                    comp = new LED(x, y);
-                                    if (compObj.has("state")) {
-                                        ((LED) comp).setOn(compObj.get("state").getAsBoolean());
-                                    }
-                                    if (compObj.has("resistance") && compObj.get("resistance").getAsDouble() == 1) {
-                                        ((LED) comp).burn();
-                                    }
-                                    break;
-                                case "Button":
-                                    comp = new Button(x, y);
-                                    if (compObj.has("state")) {
-                                        ((Button) comp).setPressed(compObj.get("state").getAsBoolean());
-                                    }
-                                    break;
-                                case "Resistor":
-                                    comp = new Resistor(x, y);
-                                    if (compObj.has("resistance")) {
-                                        ((Resistor) comp).setResistance(compObj.get("resistance").getAsDouble());
-                                    }
-                                    break;
-                                case "ArduinoUNO":
-                                    comp = new ArduinoUNO(x, y);
-                                    if (compObj.has("state")) {
-                                        ((ArduinoUNO) comp).setPowered(compObj.get("state").getAsBoolean());
-                                    }
-                                    break;
-                                case "Timer":
-                                    comp = new Timer(x, y);
-                                    if (compObj.has("state")) {
-                                        ((Timer) comp).setActive(compObj.get("state").getAsBoolean());
-                                    }
-                                    // Интервал сохраняется в resistance
-                                    if (compObj.has("resistance")) {
-                                        double interval = compObj.get("resistance").getAsDouble();
-                                        ((Timer) comp).setInterval((long) interval);
-                                    }
-                                    break;
-                            }
-                            
-                            if (comp != null) {
-                                components.add(comp);
-                                currentCircuit.addComponent(comp);
-                                
-                                // Добавляем обработчик кликов для загруженного компонента
-                                Node shape = comp.getShape();
-                                if (shape != null) {
-                                    shape.setVisible(true);
-                                    shape.setMouseTransparent(false);
-                                    shape.setPickOnBounds(true);
-                                    if (shape instanceof javafx.scene.Group) {
-                                        shape.setPickOnBounds(false);
-                                    }
-
-                                    final Component finalComp = comp;
-                                    shape.setOnMouseClicked(e -> {
-                                        e.consume();
-                                        handleComponentInteraction(finalComp, e);
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Восстанавливаем провода
-                    if (componentsData.has("wires")) {
-                        com.google.gson.JsonArray wiresArray = componentsData.get("wires").getAsJsonArray();
-                        
-                        for (int i = 0; i < wiresArray.size(); i++) {
-                            com.google.gson.JsonObject wireObj = wiresArray.get(i).getAsJsonObject();
-                            if (!wireObj.has("fromIndex") || !wireObj.has("toIndex")) continue;
-                            int fromIndex = wireObj.get("fromIndex").getAsInt();
-                            int toIndex = wireObj.get("toIndex").getAsInt();
-                            if (fromIndex >= 0 && toIndex >= 0 && fromIndex < components.size() && toIndex < components.size()) {
-                                Component from = components.get(fromIndex);
-                                Component to = components.get(toIndex);
-                                Wire wire = new Wire(from, to);
-                                wires.add(wire);
-                                currentCircuit.addWire(wire);
-                                from.addConnection(to);
-                            }
-                        }
-                    }
-                }
-                
-                setupComponentPane();
+                loadCircuitFromLocalJson(normalizeCircuitRoot(obj));
+                drawBreadboard();
             }
         }
     }
@@ -2928,7 +2883,7 @@ public class ArduinoController implements Initializable {
 
     private void resetButtonStyles() {
         for (javafx.scene.control.Button btn : new javafx.scene.control.Button[] {
-            btnLED, btnButton, btnResistor, btnArduino, btnTimer
+            btnLED, btnButton, btnResistor, btnArduino, btnTimer, btnBattery
         }) {
             if (btn != null) {
                 btn.getStyleClass().remove("component-button-selected");
@@ -2936,142 +2891,10 @@ public class ArduinoController implements Initializable {
         }
     }
 
-    private void offerDemoCircuitAfterRegister() {
-        Alert offer = new Alert(Alert.AlertType.CONFIRMATION);
-        offer.setTitle("Демо-схема");
-        offer.setHeaderText("Загрузить демо-схему для знакомства?");
-        offer.setContentText(
-            "На плате три компактных примера:\n\n"
-                + "1) Кнопка → резистор 220 Ом → LED — безопасная цепь с расчётом\n"
-                + "2) Таймер → LED — мигание (Arduino уже включена, активируйте таймер)\n"
-                + "3) Кнопка → 2 LED без резистора — при нажатии перегорят (перегрузка)\n\n"
-                + "Нажмите «Симуляция», затем кнопки на плате. Кнопка «Расчёт» покажет формулы для резистора.");
-        offer.getButtonTypes().setAll(ButtonType.OK, ButtonType.CANCEL);
-        if (offer.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK) {
-            loadDemoCircuit();
-        }
-    }
-
-    private double demoCol(int col) {
-        return BreadboardLayout.BOARD_HOLE_MIN_X + col * BreadboardLayout.BOARD_CELL;
-    }
-
-    private double demoRow(int row) {
-        return BreadboardLayout.BOARD_HOLE_MIN_Y + row * BreadboardLayout.BOARD_CELL;
-    }
-
-    private void loadDemoCircuit() {
-        components.clear();
-        wires.clear();
-        componentPane.getChildren().clear();
-        wirePane.getChildren().clear();
-        currentCircuit = new Circuit("Демо-схема");
-        if (circuitNameField != null) {
-            circuitNameField.setText("Демо-схема");
-        }
-        clearComponentSelection();
-        selectedComponentType = null;
-        isConnecting = false;
-        isSelectingArea = false;
-        isDraggingComponents = false;
-        sourceComponent = null;
-        sourceAnchor = null;
-        hidePreview();
-        resetButtonStyles();
-        resetModeButtons();
-
-        // 1) UNO → Кнопка → Резистор 220 Ω → LED
-        ArduinoUNO uno1 = new ArduinoUNO(demoCol(2), demoRow(4));
-        uno1.setPowered(true);
-        Button b1 = new Button(demoCol(10), demoRow(4));
-        Resistor r1 = new Resistor(demoCol(14), demoRow(4));
-        r1.setResistance(220);
-        LED l1 = new LED(demoCol(18), demoRow(4));
-        addDemoComponents(uno1, b1, r1, l1);
-        addDemoWire(uno1, b1);
-        addDemoWire(b1, r1);
-        addDemoWire(r1, l1);
-
-        // 2) UNO → Таймер → LED (мигание)
-        ArduinoUNO uno2 = new ArduinoUNO(demoCol(2), demoRow(11));
-        uno2.setPowered(true);
-        Timer t2 = new Timer(demoCol(10), demoRow(11));
-        t2.setActive(true);
-        LED l2 = new LED(demoCol(18), demoRow(11));
-        addDemoComponents(uno2, t2, l2);
-        addDemoWire(uno2, t2);
-        addDemoWire(t2, l2);
-
-        // 3) UNO → Кнопка → 2 LED без резистора (перегрузка)
-        ArduinoUNO uno3 = new ArduinoUNO(demoCol(2), demoRow(18));
-        uno3.setPowered(true);
-        Button b3 = new Button(demoCol(10), demoRow(18));
-        LED l3a = new LED(demoCol(15), demoRow(18));
-        LED l3b = new LED(demoCol(19), demoRow(18));
-        addDemoComponents(uno3, b3, l3a, l3b);
-        addDemoWire(uno3, b3);
-        addDemoWire(b3, l3a);
-        addDemoWire(b3, l3b);
-
-        drawBreadboard();
-        setupComponentPane();
-        updateStatus(
-            "Демо-схема: 1) кнопка+резистор+LED  2) таймер+LED  3) перегрузка без резистора. Запустите «Симуляция».");
-    }
-
-    private void addDemoComponents(Component... comps) {
-        for (Component c : comps) {
-            components.add(c);
-            currentCircuit.addComponent(c);
-        }
-    }
-
-    private void addDemoWire(Component from, Component to) {
-        WireAnchor fromA = connectionAnchor(from, to, null);
-        WireAnchor toA = connectionAnchor(to, from, null);
-        Wire w = new Wire(fromA, toA);
-        wires.add(w);
-        currentCircuit.addWire(w);
-        from.addConnection(to);
-        to.addConnection(from);
-    }
-
-    /** Радиус размещения для проверки наложения (половина размера компонента). */
-    private double getPlacementRadius(Component c) {
-        if (c instanceof LED) return 18;
-        if (c instanceof ArduinoUNO) return 50;
-        if (c instanceof Timer) return 35;
-        if (c instanceof Resistor) return 14;
-        if (c instanceof Button) return 25;
-        return 25;
-    }
-
-    private double getPlacementRadiusForType(String type) {
-        if (type == null) return 25;
-        switch (type) {
-            case "LED": return 18;
-            case "ArduinoUNO": return 50;
-            case "Timer": return 35;
-            case "Resistor": return 14;
-            case "Button": return 25;
-            default: return 25;
-        }
-    }
-
     private double[] getPlacementBoundsForType(String type) {
-        double halfW, halfH;
-        if (type == null) {
-            halfW = 25; halfH = 12;
-        } else {
-            switch (type) {
-                case "LED": halfW = 18; halfH = 18; break;
-                case "ArduinoUNO": halfW = 50; halfH = 25; break;
-                case "Timer": halfW = 35; halfH = 15; break;
-                case "Resistor": halfW = 16; halfH = 6; break;
-                case "Button": halfW = 25; halfH = 12; break;
-                default: halfW = 25; halfH = 12; break;
-            }
-        }
+        Component.Footprint footprint = footprintForType(type);
+        double halfW = footprint.halfWidth();
+        double halfH = footprint.halfHeight();
         return new double[] {
             BOARD_HOLE_MIN_X + halfW,
             BOARD_HOLE_MAX_X - halfW,
@@ -3081,7 +2904,9 @@ public class ArduinoController implements Initializable {
     }
 
     private void updateStatus(String message) {
-        // Статусная строка убрана по требованию UI; метод оставлен для совместимости вызовов.
+        if (statusLabel != null) {
+            statusLabel.setText("Статус: " + message);
+        }
     }
 
     private void showAlert(String title, String message) {
