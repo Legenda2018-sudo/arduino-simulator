@@ -3,6 +3,20 @@
     -fx-background-color: #1a1d23;
 }
 
+.program-tabs > .tab-header-area > .tab-header-background {
+    -fx-background-color: #1a1d23;
+}
+.program-tabs .tab {
+    -fx-background-color: #3d4654;
+    -fx-padding: 8 14;
+}
+.program-tabs .tab:selected {
+    -fx-background-color: #00838f;
+}
+.program-tabs .tab-label {
+    -fx-text-fill: #ecf0f1;
+}
+
 .toolbar {
     -fx-background-color: #252a31;
 }

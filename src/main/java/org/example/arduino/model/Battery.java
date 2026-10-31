@@ -121,6 +121,9 @@ public class Battery extends Component {
     }
 
     public void setVoltage(double voltage) {
+        if (!Double.isFinite(voltage)) {
+            throw new IllegalArgumentException("Напряжение должно быть конечным числом");
+        }
         this.voltage = Math.max(1.5, Math.min(12.0, voltage));
         updateShape();
     }

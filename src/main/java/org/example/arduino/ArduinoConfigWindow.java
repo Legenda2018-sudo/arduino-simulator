@@ -5,6 +5,9 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
@@ -57,8 +60,9 @@ public final class ArduinoConfigWindow {
         title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: #ecf0f1;");
 
         Label subtitle = wrapLabel(
-            "Плата передаёт сигнал от входных компонентов к выходным. "
-                + "Включите питание и проверьте подключения проводами (режим «Соединить»).",
+            "Без внешнего питания UNO служит учебным источником 5 В. "
+                + "В цепи от шин или батарейки UNO работает как управляемый ключ: "
+                + "включён без программы — замкнут; с программой — управляется D13. Это упрощённая учебная модель.",
             "-fx-font-size: 12px; -fx-text-fill: #95a5a6;"
         );
 
@@ -140,8 +144,8 @@ public final class ArduinoConfigWindow {
             List<String> outputs = collectOutputs(arduino, allWires);
             inputsList.setItems(FXCollections.observableArrayList(inputs));
             outputsList.setItems(FXCollections.observableArrayList(outputs));
-            inputsCount.setText(String.valueOf(inputs.size()));
-            outputsCount.setText(String.valueOf(outputs.size()));
+            inputsCount.setText(String.valueOf(inputs.stream().filter(s -> !s.equals("Ничего не подключено")).count()));
+            outputsCount.setText(String.valueOf(outputs.stream().filter(s -> !s.equals("Ничего не подключено")).count()));
 
             String accent = on ? "#27AE60" : "#E74C3C";
             statusRow.setStyle(
@@ -166,6 +170,32 @@ public final class ArduinoConfigWindow {
             refresh.run();
         });
 
+        Label programHint = wrapLabel(
+            "Базовая программа Arduino: pinMode, digitalWrite, delay, setup и loop. "
+            + "Внешний выход платы управляется D13 (правый контакт); левый — возврат. "
+            + "Другие пины доступны во внутренней модели. Переменные и условия пока не поддерживаются. "
+            + "Пустая программа возвращает прежний режим передачи сигнала.",
+            "-fx-text-fill: #bdc3c7; -fx-font-size: 12px;");
+        TextArea editor = new TextArea(arduino.getProgramSource());
+        editor.setPromptText("Введите void setup() и void loop() или загрузите пример");
+        editor.setPrefRowCount(12);
+        editor.setStyle("-fx-font-family: Consolas; -fx-font-size: 12px;");
+        Label programStatus = wrapLabel("Изменения нужно применить перед закрытием окна.",
+            "-fx-text-fill: #bdc3c7;");
+        Button example = new Button("Пример мигания");
+        example.setOnAction(e -> editor.setText(ArduinoUNO.BLINK_PROGRAM));
+        Button apply = new Button("Применить программу");
+        apply.setOnAction(e -> {
+            try {
+                arduino.setProgramSource(editor.getText());
+                programStatus.setText(arduino.hasProgram()
+                    ? "Программа сохранена в плате. Включите питание и запустите симуляцию."
+                    : "Программа удалена. Включён режим передачи сигнала.");
+                refresh.run();
+            } catch (IllegalArgumentException error) {
+                programStatus.setText("Ошибка: " + error.getMessage());
+            }
+        });
         root.getChildren().addAll(
             title,
             subtitle,
@@ -188,7 +218,23 @@ public final class ArduinoConfigWindow {
         scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         scroll.setStyle("-fx-background-color: #252a31; -fx-background: #252a31;");
 
-        stage.setScene(new Scene(scroll, WINDOW_WIDTH, 640));
+        VBox programContent = new VBox(12, sectionCaption("Программа контроллера"),
+            programHint, editor, example, apply, programStatus);
+        programContent.setPadding(new Insets(20, 24, 24, 24));
+        programContent.setStyle("-fx-background-color: #252a31;");
+        ScrollPane programScroll = new ScrollPane(programContent);
+        programScroll.setFitToWidth(true);
+        programScroll.setStyle("-fx-background-color: #252a31; -fx-background: #252a31;");
+        programScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        TabPane tabs = new TabPane(new Tab("Плата и питание", scroll), new Tab("Программа", programScroll));
+        tabs.getStyleClass().add("program-tabs");
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.getSelectionModel().select(1);
+        Scene scene = new Scene(tabs, WINDOW_WIDTH, 720);
+        scene.getStylesheets().add(ArduinoConfigWindow.class.getResource("styles.css").toExternalForm());
+        example.getStyleClass().add("action-button");
+        apply.getStyleClass().add("action-button");
+        stage.setScene(scene);
         stage.setMinWidth(460);
         stage.setMinHeight(480);
         stage.setResizable(true);

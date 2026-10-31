@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: org.example.arduino.ArduinoProgramTest
+-------------------------------------------------------------------------------
+Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.588 s -- in org.example.arduino.ArduinoProgramTest

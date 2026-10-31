@@ -78,6 +78,7 @@ public final class CircuitPhysics {
         }
 
         public String formulaSteps() {
+            if (currentMa == 0) return "U ≤ V_LED → LED не светится, I ≈ 0 мА";
             if (resistorOhms <= 0) {
                 return String.format(
                     "I = (U − V_LED) / R = (%.1f − %.1f) / 0 → ∞ мА",
@@ -99,6 +100,7 @@ public final class CircuitPhysics {
 
         /** Одна строка — для строки статуса вверху окна (без переносов). */
         public String formulaOneLine() {
+            if (currentMa == 0) return "U ≤ V_LED → LED не светится, I ≈ 0 мА";
             if (resistorOhms <= 0) {
                 return String.format("I = (%.1f − %.1f) / 0 → ∞ мА", supplyV, ledVf);
             }
@@ -114,6 +116,11 @@ public final class CircuitPhysics {
     }
 
     public static double currentMilliAmps(double supplyV, double resistorOhms, double ledVf) {
+        if (!Double.isFinite(supplyV) || !Double.isFinite(ledVf) || Double.isNaN(resistorOhms)
+            || supplyV < 0 || ledVf < 0 || resistorOhms < 0) {
+            throw new IllegalArgumentException("Некорректные параметры электрической цепи");
+        }
+        if (supplyV <= ledVf) return 0;
         if (resistorOhms <= 0) {
             return Double.POSITIVE_INFINITY;
         }
@@ -125,7 +132,7 @@ public final class CircuitPhysics {
         if (targetMa <= 0) {
             return 220;
         }
-        return (supplyV - ledVf) / (targetMa / 1000.0);
+        return Math.max(0, (supplyV - ledVf) / (targetMa / 1000.0));
     }
 
     public static boolean isLedSafe(double currentMa) {
@@ -142,6 +149,7 @@ public final class CircuitPhysics {
     }
 
     public static String shortStatus(double currentMa) {
+        if (currentMa == 0) return "ток ≈ 0 мА";
         if (Double.isInfinite(currentMa) || currentMa <= 0) {
             return "ток: опасно (нет резистора)";
         }
@@ -149,6 +157,7 @@ public final class CircuitPhysics {
     }
 
     public static SafetyLevel classifyCurrent(double currentMa, double resistorOhms) {
+        if (currentMa == 0) return SafetyLevel.TOO_LOW;
         if (resistorOhms <= 0 || Double.isInfinite(currentMa)) {
             return SafetyLevel.NO_RESISTOR;
         }

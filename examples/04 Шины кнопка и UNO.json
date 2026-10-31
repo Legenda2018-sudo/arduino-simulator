@@ -1,0 +1,71 @@
+{
+  "name": "Шины — резистор — LED — кнопка — UNO — GND",
+  "components": [
+    {
+      "type": "Resistor",
+      "x": 200,
+      "y": 100,
+      "resistance": 220
+    },
+    {
+      "type": "LED",
+      "x": 400,
+      "y": 100,
+      "state": false,
+      "burned": false
+    },
+    {
+      "type": "Button",
+      "x": 600,
+      "y": 100,
+      "state": true
+    },
+    {
+      "type": "ArduinoUNO",
+      "x": 800,
+      "y": 100,
+      "state": true,
+      "programSource": ""
+    }
+  ],
+  "wires": [
+    {
+      "fromKind": "RAIL_PLUS",
+      "fromRailX": 100,
+      "toKind": "COMPONENT",
+      "toIndex": 0,
+      "toPin": 1
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 0,
+      "fromPin": 2,
+      "toKind": "COMPONENT",
+      "toIndex": 1,
+      "toPin": 0
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 1,
+      "fromPin": 0,
+      "toKind": "COMPONENT",
+      "toIndex": 2,
+      "toPin": 0
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 2,
+      "fromPin": 0,
+      "toKind": "COMPONENT",
+      "toIndex": 3,
+      "toPin": 1
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 3,
+      "fromPin": 2,
+      "toKind": "RAIL_MINUS",
+      "toRailX": 900
+    }
+  ]
+}

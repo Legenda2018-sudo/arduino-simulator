@@ -70,6 +70,10 @@ public class Circuit {
                 ArduinoUNO arduino = (ArduinoUNO) comp;
                 compData.setType("ArduinoUNO"); // в БД ключ без пробела, иначе при загрузке не распознаётся
                 compData.setState(arduino.isPowered());
+                compData.setProgramSource(arduino.getProgramSource());
+            } else if (comp instanceof Battery battery) {
+                compData.setType("Battery");
+                compData.setVoltage(battery.getVoltage());
             } else if (comp instanceof Timer) {
                 compData.setType("Timer");
                 Timer timer = (Timer) comp;

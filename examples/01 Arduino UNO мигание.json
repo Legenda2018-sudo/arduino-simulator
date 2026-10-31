@@ -1,0 +1,51 @@
+{
+  "name": "Arduino UNO — мигание LED",
+  "components": [
+    {
+      "type": "ArduinoUNO",
+      "x": 200,
+      "y": 200,
+      "state": true,
+      "programSource": "void setup() {\n  pinMode(13, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(13, HIGH);\n  delay(500);\n  digitalWrite(13, LOW);\n  delay(500);\n}"
+    },
+    {
+      "type": "Resistor",
+      "x": 400,
+      "y": 200,
+      "resistance": 220
+    },
+    {
+      "type": "LED",
+      "x": 600,
+      "y": 200,
+      "state": false,
+      "burned": false
+    }
+  ],
+  "wires": [
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 0,
+      "fromPin": 2,
+      "toKind": "COMPONENT",
+      "toIndex": 1,
+      "toPin": 1
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 1,
+      "fromPin": 2,
+      "toKind": "COMPONENT",
+      "toIndex": 2,
+      "toPin": 0
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 2,
+      "fromPin": 0,
+      "toKind": "COMPONENT",
+      "toIndex": 0,
+      "toPin": 1
+    }
+  ]
+}

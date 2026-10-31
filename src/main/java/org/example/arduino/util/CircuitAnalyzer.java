@@ -91,84 +91,153 @@ public final class CircuitAnalyzer {
         }
     }
 
-    private record LoopState(
-        Component component,
-        double ohms,
-        double wireOhms,
-        boolean hasResistor,
-        Set<Wire> usedWires,
-        boolean seenLed,
-        boolean leftSource
-    ) {
-    }
-
-    private record WireStep(Component component, Wire wire) {
-    }
-
-    private record LoopResult(double seriesOhms, double wireOhms, boolean hasResistor) {
-    }
-
     private CircuitAnalyzer() {
     }
 
+    public static boolean controllerClosed(ArduinoUNO uno) {
+        return uno.isPowered() && (!uno.hasProgram() || uno.getOutput());
+    }
+
+    /** External supplies provide voltage; a UNO in that circuit is an educational controlled switch. */
+    public static boolean hasExternalSupply(Component start, List<Wire> wires) {
+        Set<Component> seen = new HashSet<>(); Queue<Component> queue = new ArrayDeque<>();
+        seen.add(start); queue.add(start);
+        while (!queue.isEmpty()) {
+            Component current = queue.remove();
+            if (current instanceof Battery) return true;
+            for (Wire w : wires) {
+                if (w.getFrom() != current && w.getTo() != current) continue;
+                Component next = w.getFrom() == current ? w.getTo() : w.getFrom();
+                if (next == null) return true;
+                if (seen.add(next)) queue.add(next);
+            }
+        }
+        return false;
+    }
+
+    private record Contact(Object component, int pin) { }
+    private static Contact contact(WireAnchor anchor) {
+        if (anchor.isRailPlus()) return new Contact("rail",2);
+        if (anchor.isRailMinus()) return new Contact("rail",1);
+        return new Contact(anchor.getComponent(),anchor.getPin());
+    }
+    private static Contact wireContact(WireAnchor anchor, Wire wire) {
+        // The visual center of a LED is not an electrical junction between its two leads.
+        return anchor.getComponent() instanceof LED ? new Contact(wire,anchor == wire.getFromAnchor()?1:2) : contact(anchor);
+    }
+
+    /** Detect a wire-only bypass of a source; resistors and LED loads are not conductors here. */
+    public static String shortCircuitWarning(List<Component> components, List<Wire> wires) {
+        java.util.Map<Contact,java.util.Set<Contact>> graph = new java.util.HashMap<>();
+        for (Wire wire : wires) {
+            Contact a=wireContact(wire.getFromAnchor(),wire),b=wireContact(wire.getToAnchor(),wire);
+            graph.computeIfAbsent(a,k->new HashSet<>()).add(b);
+            graph.computeIfAbsent(b,k->new HashSet<>()).add(a);
+        }
+        for(Component c:components) if(c instanceof ArduinoUNO u && hasExternalSupply(u,wires) && controllerClosed(u)) {
+            Contact a=new Contact(u,1),b=new Contact(u,2);
+            graph.computeIfAbsent(a,k->new HashSet<>()).add(b);
+            graph.computeIfAbsent(b,k->new HashSet<>()).add(a);
+        }
+        java.util.List<Object> sources=new ArrayList<>(); sources.add("rail");
+        for(Component c:components) if(c instanceof Battery || c instanceof ArduinoUNO u && !hasExternalSupply(u,wires) && u.isPowered()
+            && (!u.hasProgram() || u.getOutput())) sources.add(c);
+        for(Object source:sources) {
+            Set<Contact> seen=new HashSet<>(); Queue<Contact> queue=new ArrayDeque<>();
+            Contact start=new Contact(source,2),end=new Contact(source,1);
+            seen.add(start);queue.add(start);
+            while(!queue.isEmpty()) {
+                Contact current=queue.remove();
+                if(current.equals(end)) return "Короткое замыкание источника: соединены + и − проводами без нагрузки";
+                for(Contact next:graph.getOrDefault(current,Set.of())) if(seen.add(next))queue.add(next);
+            }
+        }
+        return null;
+    }
+
+    /** Refuse ambiguous legacy loads instead of displaying a plausible but false current. */
+    public static String limitation(LED target, List<Wire> wires) {
+        long count = wires.stream().filter(w -> w.getFrom() == target || w.getTo() == target).count();
+        if (count > 2) return "LED: нужны ровно два провода; отдельные анод и катод пока не заданы";
+        Set<Component> visited = new HashSet<>();
+        Set<Component> sources = new HashSet<>();
+        Queue<Component> queue = new ArrayDeque<>();
+        queue.add(target); visited.add(target); boolean rails = false;
+        while (!queue.isEmpty()) {
+            Component current = queue.remove();
+            for (Wire wire : wires) {
+                if (wire.getFrom() != current && wire.getTo() != current) continue;
+                Component next = wire.getFrom() == current ? wire.getTo() : wire.getFrom();
+                if (next == null) { rails = true; continue; }
+                if (next instanceof Battery) { sources.add(next); continue; }
+                if (next instanceof ArduinoUNO && !hasExternalSupply(next,wires)) {
+                    sources.add(next); continue;
+                }
+                if (next instanceof LED && next != target) return "Общая цепь нескольких LED пока не поддерживается; используйте отдельные ветви";
+                if (visited.add(next)) queue.add(next);
+            }
+        }
+        for(Component component : visited) if(component instanceof ArduinoUNO) {
+            List<WireAnchor> contacts=new ArrayList<>();
+            for(Wire wire:wires) {
+                if(wire.getFrom()==component)contacts.add(wire.getFromAnchor());
+                if(wire.getTo()==component)contacts.add(wire.getToAnchor());
+            }
+            if(contacts.size()>=2 && contacts.stream().map(WireAnchor::getPin).distinct().count()==1)
+                return "Оба провода UNO подключены к одной стороне: используйте левый и правый контакты";
+        }
+        if (!rails && sources.isEmpty()) for (Component component : visited) {
+            if (component instanceof ArduinoUNO) sources.add(component);
+        }
+        if (sources.size() + (rails ? 1 : 0) > 1) return "Два источника питания в одной цепи: оставьте шины, одну батарейку или один UNO. UNO с внешним питанием работает как учебный ключ";
+        return null;
+    }
+
+    public static String explainOpen(LED led, List<Wire> wires) {
+        long contacts = wires.stream().filter(w -> w.getFrom() == led || w.getTo() == led).count();
+        if (contacts < 2) return "LED: подключите два провода и замкните цепь через источник питания";
+        Set<Component> seen=new HashSet<>(); Queue<Component> queue=new ArrayDeque<>();
+        seen.add(led);queue.add(led);
+        while(!queue.isEmpty()) {
+            Component current=queue.remove();
+            if(current instanceof ArduinoUNO uno && !controllerClosed(uno)) return uno.isPowered()
+                ? "UNO: D13 = LOW — цепь выключена программой" : "UNO выключен — нажмите на плату для включения";
+            if(current instanceof Button b && !b.isPressed()) return "Кнопка отпущена — нажмите её, чтобы замкнуть цепь";
+            if(current instanceof Timer t && !t.getOutput()) return t.isActive() && t.isRunning()
+                ? "Таймер: пауза между импульсами" : "Таймер выключен — включите его";
+            for(Component next:neighbors(current,wires)) if(seen.add(next)) queue.add(next);
+        }
+        return "Цепь разомкнута или нет питания: проверьте возврат к GND/минусу и разные контакты UNO";
+    }
+
     public static Result analyzeLed(LED led, List<Component> components, List<Wire> wires) {
-        if (led == null || wires == null) {
+        if (led == null || wires == null || components == null || limitation(led, wires) != null) {
             return Result.open();
         }
 
-        PowerRailSimulator.PowerResult rail = PowerRailSimulator.analyzeLedPowerPath(led, components, wires);
-        if (rail.closed()) {
-            return new Result(
-                CircuitKind.POWER_RAIL,
-                rail.seriesOhms(),
-                rail.seriesOhms() <= 0,
-                CircuitPhysics.SUPPLY_V,
-                rail.wireOhms()
-            );
+        Result best = fromNetwork(led, null, CircuitKind.POWER_RAIL, CircuitPhysics.SUPPLY_V, wires);
+        for (Component component : components) {
+            Result candidate = Result.open();
+            if (component instanceof Battery battery) {
+                candidate = fromNetwork(led, battery, CircuitKind.BATTERY, battery.getVoltage(), wires);
+            } else if (component instanceof ArduinoUNO uno && uno.isPowered() && (!uno.hasProgram() || uno.getOutput())) {
+                if (hasExternalSupply(uno, wires)) continue;
+                candidate = fromNetwork(led, uno, CircuitKind.LOGIC, CircuitPhysics.SUPPLY_V, wires);
+            }
+            if (candidate.isClosed() && (!best.isClosed() || current(candidate) > current(best))) best = candidate;
         }
+        return best;
+    }
 
-        LoopResult bestBattery = null;
-        Battery bestBatterySource = null;
-        for (Component comp : components) {
-            if (!(comp instanceof Battery battery)) {
-                continue;
-            }
-            LoopResult loop = traceBatteryLoop(battery, led, wires);
-            if (loop != null && (bestBattery == null || loop.seriesOhms() < bestBattery.seriesOhms())) {
-                bestBattery = loop;
-                bestBatterySource = battery;
-            }
-        }
-        if (bestBattery != null && bestBatterySource != null) {
-            return new Result(
-                CircuitKind.BATTERY,
-                bestBattery.seriesOhms(),
-                !bestBattery.hasResistor(),
-                bestBatterySource.getVoltage(),
-                bestBattery.wireOhms()
-            );
-        }
+    private static double current(Result result) {
+        return CircuitPhysics.currentMilliAmps(result.supplyVolts(),result.seriesOhms(),CircuitPhysics.LED_VF);
+    }
 
-        LoopResult bestUno = null;
-        for (Component comp : components) {
-            if (!(comp instanceof ArduinoUNO arduino) || !arduino.isPowered()) {
-                continue;
-            }
-            LoopResult loop = tracePoweredUnoLoop(arduino, led, wires);
-            if (loop != null && (bestUno == null || loop.seriesOhms() < bestUno.seriesOhms())) {
-                bestUno = loop;
-            }
-        }
-        if (bestUno != null) {
-            return new Result(
-                CircuitKind.LOGIC,
-                bestUno.seriesOhms(),
-                !bestUno.hasResistor(),
-                CircuitPhysics.SUPPLY_V,
-                bestUno.wireOhms()
-            );
-        }
-        return Result.open();
+    private static Result fromNetwork(LED led, Component source, CircuitKind kind, double volts, List<Wire> wires) {
+        PassiveNetwork.Equivalent equivalent = PassiveNetwork.analyze(led,source,volts,wires);
+        if (equivalent == null || equivalent.volts() < 1e-9) return Result.open();
+        return new Result(kind,equivalent.ohms(),equivalent.ohms()-equivalent.wireOhms()<1e-6,
+            equivalent.volts(),equivalent.wireOhms());
     }
 
     public static LedOutcome computeLedOutcome(LED led, List<Component> components, List<Wire> wires) {
@@ -182,20 +251,10 @@ public final class CircuitAnalyzer {
             CircuitPhysics.LED_VF
         );
 
-        if (circuit.kind() == CircuitKind.POWER_RAIL) {
-            boolean burn = calc.getSafety() == CircuitPhysics.SafetyLevel.OVERLOAD
-                || calc.getSafety() == CircuitPhysics.SafetyLevel.NO_RESISTOR;
-            boolean glow = !burn && CircuitPhysics.isLedGlowing(calc.getCurrentMa());
-            return new LedOutcome(circuit, calc, glow, burn, false);
-        }
-
-        if (circuit.missingResistorWarning()) {
-            return new LedOutcome(circuit, calc, true, false, true);
-        }
         boolean burn = calc.getSafety() == CircuitPhysics.SafetyLevel.OVERLOAD
             || calc.getSafety() == CircuitPhysics.SafetyLevel.NO_RESISTOR;
         boolean glow = !burn && CircuitPhysics.isLedGlowing(calc.getCurrentMa());
-        return new LedOutcome(circuit, calc, glow, burn, false);
+        return new LedOutcome(circuit, calc, glow, burn, circuit.missingResistorWarning());
     }
 
     public static boolean hasPathFromArduino(Component target, List<Component> components, List<Wire> wires) {
@@ -237,190 +296,12 @@ public final class CircuitAnalyzer {
         return false;
     }
 
-    /**
-     * Замкнутый контур через UNO: UNO → … → LED → … → UNO.
-     */
-    private static LoopResult tracePoweredUnoLoop(ArduinoUNO uno, LED targetLed, List<Wire> wires) {
-        Queue<LoopState> queue = new ArrayDeque<>();
-        queue.offer(new LoopState(uno, 0, 0, false, Set.of(), false, false));
-
-        while (!queue.isEmpty()) {
-            LoopState state = queue.poll();
-            Component current = state.component();
-            boolean seenLed = state.seenLed() || current == targetLed;
-
-            if (current == uno && seenLed && state.leftSource() && state.usedWires().size() >= 2) {
-                return new LoopResult(state.ohms(), state.wireOhms(), state.hasResistor());
-            }
-            if (!conductsForTraversal(current)) {
-                continue;
-            }
-
-            for (WireStep step : wireNeighbors(current, wires)) {
-                Component next = step.component();
-                Wire wire = step.wire();
-                if (state.usedWires().contains(wire)) {
-                    continue;
-                }
-                if (next instanceof LED && next != targetLed) {
-                    continue;
-                }
-                if (next == uno) {
-                    if (seenLed && state.leftSource() && state.usedWires().size() >= 1) {
-                        Set<Wire> withReturn = new HashSet<>(state.usedWires());
-                        withReturn.add(wire);
-                        if (withReturn.size() >= 2) {
-                            double wireAdd = wire.getResistanceOhms();
-                            return new LoopResult(
-                                state.ohms() + wireAdd,
-                                state.wireOhms() + wireAdd,
-                                state.hasResistor()
-                            );
-                        }
-                    }
-                    continue;
-                }
-                double wireAdd = wire.getResistanceOhms();
-                double compAdd = resistanceStep(current, next, wires);
-                boolean hasR = state.hasResistor() || next instanceof Resistor;
-                Set<Wire> used = new HashSet<>(state.usedWires());
-                used.add(wire);
-                boolean leftSource = state.leftSource() || current == uno;
-                queue.offer(new LoopState(
-                    next,
-                    state.ohms() + wireAdd + compAdd,
-                    state.wireOhms() + wireAdd,
-                    hasR,
-                    used,
-                    seenLed || next == targetLed,
-                    leftSource
-                ));
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Замкнутый контур: батарейка + → … → LED → … → батарейка −.
-     */
-    private static LoopResult traceBatteryLoop(Battery battery, LED targetLed, List<Wire> wires) {
-        Queue<LoopState> queue = new ArrayDeque<>();
-        for (WireStep step : wireNeighborsAtPin(battery, 1, wires)) {
-            Wire wire = step.wire();
-            Component next = step.component();
-            if (next == battery || next instanceof LED && next != targetLed) {
-                continue;
-            }
-            double wireAdd = wire.getResistanceOhms();
-            double compAdd = resistanceStep(battery, next, wires);
-            boolean hasR = next instanceof Resistor;
-            Set<Wire> used = new HashSet<>();
-            used.add(wire);
-            queue.offer(new LoopState(
-                next,
-                wireAdd + compAdd,
-                wireAdd,
-                hasR,
-                used,
-                next == targetLed,
-                true
-            ));
-        }
-
-        while (!queue.isEmpty()) {
-            LoopState state = queue.poll();
-            Component current = state.component();
-            boolean seenLed = state.seenLed() || current == targetLed;
-
-            if (!conductsForTraversal(current)) {
-                continue;
-            }
-
-            for (WireStep step : wireNeighbors(current, wires)) {
-                Component next = step.component();
-                Wire wire = step.wire();
-                if (state.usedWires().contains(wire)) {
-                    continue;
-                }
-                if (next instanceof LED && next != targetLed) {
-                    continue;
-                }
-                if (next == battery) {
-                    if (seenLed && wireConnectsPin(wire, battery, 2)) {
-                        double wireAdd = wire.getResistanceOhms();
-                        return new LoopResult(
-                            state.ohms() + wireAdd,
-                            state.wireOhms() + wireAdd,
-                            state.hasResistor()
-                        );
-                    }
-                    continue;
-                }
-                double wireAdd = wire.getResistanceOhms();
-                double compAdd = resistanceStep(current, next, wires);
-                boolean hasR = state.hasResistor() || next instanceof Resistor;
-                Set<Wire> used = new HashSet<>(state.usedWires());
-                used.add(wire);
-                queue.offer(new LoopState(
-                    next,
-                    state.ohms() + wireAdd + compAdd,
-                    state.wireOhms() + wireAdd,
-                    hasR,
-                    used,
-                    seenLed || next == targetLed,
-                    state.leftSource()
-                ));
-            }
-        }
-        return null;
-    }
-
-    private static boolean wireConnectsPin(Wire wire, Battery battery, int pin) {
-        WireAnchor anchor = WireAnchor.component(battery, pin);
-        return wire.getFromAnchor().isSameEndpoint(anchor) || wire.getToAnchor().isSameEndpoint(anchor);
-    }
-
-    private static List<WireStep> wireNeighborsAtPin(Component component, int pin, List<Wire> wires) {
-        WireAnchor anchor = WireAnchor.component(component, pin);
-        List<WireStep> result = new ArrayList<>();
-        for (Wire wire : wires) {
-            if (wire.getFromAnchor().isSameEndpoint(anchor)) {
-                Component to = wire.getTo();
-                if (to != null && to != component) {
-                    result.add(new WireStep(to, wire));
-                }
-            } else if (wire.getToAnchor().isSameEndpoint(anchor)) {
-                Component from = wire.getFrom();
-                if (from != null && from != component) {
-                    result.add(new WireStep(from, wire));
-                }
-            }
-        }
-        return result;
-    }
-
-    private static List<WireStep> wireNeighbors(Component component, List<Wire> wires) {
-        List<WireStep> result = new ArrayList<>();
-        for (Wire wire : wires) {
-            if (wire.getFrom() == component) {
-                Component to = wire.getTo();
-                if (to != null && to != component) {
-                    result.add(new WireStep(to, wire));
-                }
-            } else if (wire.getTo() == component) {
-                Component from = wire.getFrom();
-                if (from != null && from != component) {
-                    result.add(new WireStep(from, wire));
-                }
-            }
-        }
-        return result;
-    }
-
     /** Два резистора с проводами ножка1–ножка1 и ножка2–ножка2 включены параллельно. */
     public static boolean areResistorsParallel(Resistor r1, Resistor r2, List<Wire> wires) {
-        return hasResistorPinWire(r1, 1, r2, 1, wires)
-            && hasResistorPinWire(r1, 2, r2, 2, wires);
+        return (hasResistorPinWire(r1, 1, r2, 1, wires)
+            && hasResistorPinWire(r1, 2, r2, 2, wires))
+            || (hasResistorPinWire(r1, 1, r2, 2, wires)
+            && hasResistorPinWire(r1, 2, r2, 1, wires));
     }
 
     public static double parallelOhms(double r1, double r2) {
@@ -471,33 +352,6 @@ public final class CircuitAnalyzer {
             }
         }
         return false;
-    }
-
-    private static double resistanceStep(Component current, Component next, List<Wire> wires) {
-        if (!(next instanceof Resistor nextR)) {
-            return 0;
-        }
-        if (current instanceof Resistor currentR && areResistorsParallel(currentR, nextR, wires)) {
-            double parallel = parallelOhms(currentR.getResistance(), nextR.getResistance());
-            return parallel - currentR.getResistance();
-        }
-        return nextR.getResistance();
-    }
-
-    private static boolean conductsForTraversal(Component component) {
-        if (component instanceof Timer timer) {
-            return timer.isActive() && timer.isRunning() && timer.getOutputState();
-        }
-        if (component instanceof Button button) {
-            return button.isPressed();
-        }
-        if (component instanceof ArduinoUNO arduino) {
-            return arduino.isPowered();
-        }
-        if (component instanceof Battery) {
-            return false;
-        }
-        return component instanceof Resistor || component instanceof LED;
     }
 
     private static List<Component> neighbors(Component component, List<Wire> wires) {

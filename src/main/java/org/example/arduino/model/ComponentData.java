@@ -2,6 +2,12 @@ package org.example.arduino.model;
 
 public class ComponentData {
     private String type;
+    private String programSource;
+    private double voltage;
+    public String getProgramSource() { return programSource; }
+    public void setProgramSource(String value) { programSource = value; }
+    public double getVoltage() { return voltage; }
+    public void setVoltage(double value) { voltage = value; }
     private double x;
     private double y;
     private boolean state;

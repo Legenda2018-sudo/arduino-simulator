@@ -1,0 +1,50 @@
+{
+  "name": "Батарейка 6V — LED и резистор",
+  "components": [
+    {
+      "type": "Battery",
+      "x": 200,
+      "y": 200,
+      "voltage": 6
+    },
+    {
+      "type": "Resistor",
+      "x": 400,
+      "y": 200,
+      "resistance": 220
+    },
+    {
+      "type": "LED",
+      "x": 600,
+      "y": 200,
+      "state": false,
+      "burned": false
+    }
+  ],
+  "wires": [
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 0,
+      "fromPin": 2,
+      "toKind": "COMPONENT",
+      "toIndex": 1,
+      "toPin": 1
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 1,
+      "fromPin": 2,
+      "toKind": "COMPONENT",
+      "toIndex": 2,
+      "toPin": 0
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 2,
+      "fromPin": 0,
+      "toKind": "COMPONENT",
+      "toIndex": 0,
+      "toPin": 1
+    }
+  ]
+}

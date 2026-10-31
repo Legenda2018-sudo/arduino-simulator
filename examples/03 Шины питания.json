@@ -1,0 +1,42 @@
+{
+  "name": "Шины +5V и GND — LED и резистор",
+  "components": [
+    {
+      "type": "Resistor",
+      "x": 400,
+      "y": 300,
+      "resistance": 220
+    },
+    {
+      "type": "LED",
+      "x": 600,
+      "y": 300,
+      "state": false,
+      "burned": false
+    }
+  ],
+  "wires": [
+    {
+      "fromKind": "RAIL_PLUS",
+      "fromRailX": 400,
+      "toKind": "COMPONENT",
+      "toIndex": 0,
+      "toPin": 1
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 0,
+      "fromPin": 2,
+      "toKind": "COMPONENT",
+      "toIndex": 1,
+      "toPin": 0
+    },
+    {
+      "fromKind": "COMPONENT",
+      "fromIndex": 1,
+      "fromPin": 0,
+      "toKind": "RAIL_MINUS",
+      "toRailX": 600
+    }
+  ]
+}

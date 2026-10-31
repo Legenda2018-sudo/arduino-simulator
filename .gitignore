@@ -40,3 +40,8 @@ build/
 
 ### Mac OS ###
 .DS_Store
+# Local Firebase configuration
+src/main/resources/config.properties
+.idea/
+
+/docs/

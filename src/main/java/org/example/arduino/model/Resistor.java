@@ -133,6 +133,7 @@ public class Resistor extends Component {
     }
 
     public void setResistance(double resistance) {
+        if (!Double.isFinite(resistance)) throw new IllegalArgumentException("Сопротивление должно быть конечным числом");
         this.resistance = ResistorColorCode.snapToE12(resistance);
         updateShape();
     }

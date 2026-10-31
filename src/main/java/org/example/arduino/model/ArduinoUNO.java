@@ -7,6 +7,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.Text;
 import java.util.HashMap;
 import java.util.Map;
+import org.example.arduino.util.ArduinoProgram;
 
 /**
  * Компонент Arduino UNO
@@ -19,7 +20,34 @@ public class ArduinoUNO extends Component {
     private Map<Integer, Double> analogPins;
     // Режимы пинов (true = OUTPUT, false = INPUT)
     private Map<Integer, Boolean> pinModes;
+    public static final String BLINK_PROGRAM = "void setup() {\n  pinMode(13, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(13, HIGH);\n  delay(500);\n  digitalWrite(13, LOW);\n  delay(500);\n}\n";
+    private String programSource = "";
+    private ArduinoProgram program;
     private boolean isPowered; // Включена ли плата
+
+    public String getProgramSource() { return programSource; }
+    public boolean hasProgram() { return program != null; }
+    public void setProgramSource(String source) {
+        String next = source == null ? "" : source;
+        ArduinoProgram compiled = next.isBlank() ? null : ArduinoProgram.compile(next);
+        programSource = next;
+        program = compiled;
+        resetProgram();
+    }
+    public void resetProgram() {
+        if (program != null) program.reset();
+        digitalPins.replaceAll((pin, value) -> false);
+        analogPins.replaceAll((pin, value) -> 0.0);
+        pinModes.replaceAll((pin, value) -> true);
+        inputSignal = false;
+    }
+    public void tickProgram(long nowMillis) {
+        if (!isPowered || program == null) return;
+        program.tick(nowMillis, new ArduinoProgram.Pins() {
+            public void mode(int pin, boolean output) { setPinMode(pin, output); }
+            public void write(int pin, boolean high) { setDigitalPin(pin, high); }
+        });
+    }
     private Timer internalTimer; // Встроенный таймер
 
     private final Rectangle board;
@@ -89,6 +117,7 @@ public class ArduinoUNO extends Component {
      * Включает/выключает питание Arduino
      */
     public void setPowered(boolean powered) {
+        if (this.isPowered != powered) resetProgram();
         this.isPowered = powered;
         if (!powered) {
             // Выключаем все пины при отключении питания
@@ -171,7 +200,7 @@ public class ArduinoUNO extends Component {
         if (!isPowered) return false;
         
         if (pin >= 0 && pin <= 13) {
-            return getDigitalPin(pin);
+            return pinModes.getOrDefault(pin, true) && getDigitalPin(pin);
         }
         return false;
     }
@@ -193,7 +222,7 @@ public class ArduinoUNO extends Component {
     public boolean getOutput() {
         if (!isPowered) return false;
         // Просто передаем входной сигнал на выход
-        return inputSignal;
+        return hasProgram() ? getPinOutput(13) : inputSignal;
     }
 
     /**
@@ -229,6 +258,9 @@ public class ArduinoUNO extends Component {
     public String getStatusText() {
         if (!isPowered) {
             return "Arduino UNO: ВЫКЛ (включите кликом)";
+        }
+        if (hasProgram()) {
+            return "Arduino UNO: программа, D13 = " + (getPinOutput(13) ? "HIGH" : "LOW");
         }
         if (inputSignal) {
             return "Arduino UNO: ВКЛ, сигнал передается на выход";

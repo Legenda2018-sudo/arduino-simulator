@@ -147,7 +147,8 @@ class CircuitAnalyzerTest {
         );
         CircuitAnalyzer.LedOutcome outcome = CircuitAnalyzer.computeLedOutcome(led, comps, loop);
         assertNotNull(outcome);
-        assertTrue(outcome.glow());
+        assertFalse(outcome.glow());
+        assertTrue(outcome.burn());
         assertTrue(outcome.resistorWarning());
     }
 
@@ -183,7 +184,8 @@ class CircuitAnalyzerTest {
         );
         CircuitAnalyzer.LedOutcome outcome = CircuitAnalyzer.computeLedOutcome(led, comps, wires);
         assertNotNull(outcome);
-        assertTrue(outcome.glow());
+        assertFalse(outcome.glow());
+        assertTrue(outcome.burn());
         assertTrue(outcome.resistorWarning());
     }
 
@@ -218,7 +220,8 @@ class CircuitAnalyzerTest {
         );
         CircuitAnalyzer.LedOutcome outcome = CircuitAnalyzer.computeLedOutcome(led, comps, wires);
         assertNotNull(outcome);
-        assertTrue(outcome.glow());
+        assertFalse(outcome.glow());
+        assertTrue(outcome.burn());
         assertTrue(outcome.resistorWarning());
     }
 
@@ -346,7 +349,9 @@ class CircuitAnalyzerTest {
         );
         CircuitAnalyzer.Result circuit = CircuitAnalyzer.analyzeLed(led, comps, wires);
         assertTrue(circuit.isClosed());
-        assertEquals(68.0, circuit.seriesOhms(), totalWireOhms(wires) + 1.0);
+        // Both load and supply are on leg 1: resistor is bypassed.
+        assertTrue(circuit.seriesOhms() < totalWireOhms(wires));
+        assertTrue(circuit.missingResistorWarning());
 
         CircuitAnalyzer.LedOutcome outcome = CircuitAnalyzer.computeLedOutcome(led, comps, wires);
         assertNotNull(outcome);
@@ -371,7 +376,7 @@ class CircuitAnalyzerTest {
             new Wire(WireAnchor.component(uno, 2), WireAnchor.componentCenter(button)),
             new Wire(WireAnchor.componentCenter(button), WireAnchor.component(r1, 1)),
             new Wire(WireAnchor.component(uno, 1), WireAnchor.componentCenter(led)),
-            new Wire(WireAnchor.component(r2, 1), WireAnchor.componentCenter(led))
+            new Wire(WireAnchor.component(r2, 2), WireAnchor.componentCenter(led))
         );
         CircuitAnalyzer.Result circuit = CircuitAnalyzer.analyzeLed(led, comps, wires);
         assertTrue(circuit.isClosed());
@@ -424,16 +429,12 @@ class CircuitAnalyzerTest {
         CircuitAnalyzer.LedOutcome unoLed1 = CircuitAnalyzer.computeLedOutcome(led1, comps, wires);
         CircuitAnalyzer.LedOutcome unoLed2 = CircuitAnalyzer.computeLedOutcome(led2, comps, wires);
         CircuitAnalyzer.LedOutcome railLed3 = CircuitAnalyzer.computeLedOutcome(led3, comps, wires);
-        assertNotNull(unoLed1);
-        assertNotNull(unoLed2);
+        // One visual contact cannot identify three-wire LED polarity or shared nonlinear loads.
+        assertNull(unoLed1);
+        assertNull(unoLed2);
+        assertNotNull(CircuitAnalyzer.limitation(led1, wires));
         assertNotNull(railLed3);
-
-        assertTrue(unoLed1.glow());
-        assertFalse(unoLed1.burn());
-        assertTrue(unoLed2.glow());
-        assertFalse(unoLed2.burn());
         assertTrue(railLed3.burn());
-        assertEquals(CircuitAnalyzer.CircuitKind.LOGIC, unoLed1.circuit().kind());
         assertEquals(CircuitAnalyzer.CircuitKind.POWER_RAIL, railLed3.circuit().kind());
     }
 

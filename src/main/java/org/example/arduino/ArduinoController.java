@@ -33,6 +33,7 @@ import org.example.arduino.service.FirebaseService;
 import org.example.arduino.util.CircuitAnalyzer;
 import org.example.arduino.util.CircuitPhysics;
 import org.example.arduino.util.PowerRailSimulator;
+import org.example.arduino.util.WirePhysics;
 import org.example.arduino.util.WireSignals;
 
 import javax.imageio.ImageIO;
@@ -593,12 +594,7 @@ public class ArduinoController implements Initializable {
             return WireAnchor.component(battery, pin);
         }
         if (component instanceof ArduinoUNO) {
-            int pin;
-            if (other != null) {
-                pin = other.getX() < component.getX() ? 2 : 1;
-            } else {
-                pin = px < component.getX() ? 1 : 2;
-            }
+            int pin = px < component.getX() ? 1 : 2;
             return WireAnchor.component(component, pin);
         }
         return WireAnchor.componentCenter(component);
@@ -1320,7 +1316,8 @@ public class ArduinoController implements Initializable {
         }
         clearWireConnectionSelection();
         setupComponentPane();
-        updateStatus("✓ Соединено: " + fromLabel + " → " + target.getDisplayName());
+        updateStatus("✓ Соединено: " + fromLabel + " → " + target.getDisplayName()
+            + " | " + WirePhysics.formulaLine(wire.getLengthPixels(), wire.getResistanceOhms()));
     }
 
     private void clearWireConnectionSelection() {
@@ -1647,73 +1644,16 @@ public class ArduinoController implements Initializable {
             return "Эта схема работать не будет. Добавьте нагрузку (например, LED).";
         }
 
-        // Шины +5V и GND — полноценный источник питания (замкнутый контур через LED)
-        for (Component comp : components) {
-            if (comp instanceof LED led && PowerRailSimulator.isTopologicallyBetweenRails(led, wires)) {
-                return null;
+        // Allow interactive switching and programs to start even when the current frame is LOW/off.
+        for (Component component : components) {
+            if (component instanceof LED led) {
+                String limitation = CircuitAnalyzer.limitation(led, wires);
+                if (limitation != null) return limitation;
             }
         }
-
-        boolean hasLogicSource = false;
-        for (Component comp : components) {
-            if (comp instanceof Button || comp instanceof Timer || comp instanceof ArduinoUNO) {
-                hasLogicSource = true;
-                break;
-            }
-        }
-
-        if (!hasLogicSource) {
-            if (hasWireToRail(true) || hasWireToRail(false)) {
-                return "Эта схема работать не будет. Для шин +5V/GND нужен замкнутый контур: "
-                    + "LED соедините и с +5V, и с GND (через резистор ~220 Ом).";
-            }
-            return "Эта схема работать не будет. Нужно питание: шины +5V/GND (замкнутый контур) "
-                + "или Arduino UNO. Кнопка и таймер — переключатели, сами питание не дают.";
-        }
-
-        // Есть ли путь от логического источника к LED по проводам?
-        java.util.Set<Component> reachableFromSources = new java.util.HashSet<>();
-        for (Component comp : components) {
-            if (comp instanceof Button || comp instanceof Timer || comp instanceof ArduinoUNO) {
-                reachableFromSources.add(comp);
-            }
-        }
-        // Достижимость по проводам в обе стороны (провод не направленный)
-        boolean changed = true;
-        while (changed) {
-            changed = false;
-            for (Wire w : wires) {
-                Component from = w.getFrom();
-                Component to = w.getTo();
-                if (from instanceof LED) {
-                    continue;
-                }
-                if (from != null && reachableFromSources.contains(from)
-                    && to != null && !reachableFromSources.contains(to)) {
-                    reachableFromSources.add(to);
-                    changed = true;
-                }
-                if (to instanceof LED) {
-                    if (from != null && reachableFromSources.contains(from) && !reachableFromSources.contains(to)) {
-                        reachableFromSources.add(to);
-                        changed = true;
-                    }
-                    continue;
-                }
-                if (to != null && reachableFromSources.contains(to)
-                    && from != null && !reachableFromSources.contains(from)) {
-                    reachableFromSources.add(from);
-                    changed = true;
-                }
-            }
-        }
-        for (Component comp : components) {
-            if (comp instanceof LED && reachableFromSources.contains(comp)) {
-                return null;
-            }
-        }
-        return "Эта схема работать не будет. Соедините LED с питанием (шины +5V/GND или Arduino) "
-            + "или через цепь с кнопкой/таймером (они только замыкают сигнал, питание даёт Arduino).";
+        String shortCircuit = CircuitAnalyzer.shortCircuitWarning(components, wires);
+        if (shortCircuit != null) return shortCircuit;
+        return null;
     }
 
     private boolean hasWireToRail(boolean plusRail) {
@@ -1873,6 +1813,9 @@ public class ArduinoController implements Initializable {
     }
 
     private void startSimulation() {
+        for (Component component : components) {
+            if (component instanceof ArduinoUNO uno) uno.resetProgram();
+        }
         // Таймер в цепи питания (GND/+5V) включаем автоматически — иначе ключ разомкнут
         for (Component comp : components) {
             if (comp instanceof Timer timer && isConnectedToPowerRail(timer)) {
@@ -1907,6 +1850,9 @@ public class ArduinoController implements Initializable {
     }
 
     private void stopSimulation() {
+        for (Component component : components) {
+            if (component instanceof ArduinoUNO uno) uno.resetProgram();
+        }
         if (simulationTimer != null) {
             simulationTimer.stop();
         }
@@ -1946,6 +1892,9 @@ public class ArduinoController implements Initializable {
             CircuitAnalyzer.LedOutcome outcome = CircuitAnalyzer.computeLedOutcome(led, components, wires);
             if (outcome == null) {
                 led.setInput(false);
+                String limitation = CircuitAnalyzer.limitation(led, wires);
+                if (limitation != null) bestStatus = limitation;
+                else if (bestStatus == null) bestStatus = CircuitAnalyzer.explainOpen(led, wires);
                 continue;
             }
             if (outcome.burn()) {
@@ -1980,6 +1929,17 @@ public class ArduinoController implements Initializable {
     }
     
     private void simulate() {
+        long programTime = System.nanoTime() / 1_000_000L;
+        for (Component component : components) {
+            if (component instanceof ArduinoUNO uno) uno.tickProgram(programTime);
+        }
+        String shortCircuit = CircuitAnalyzer.shortCircuitWarning(components, wires);
+        if (shortCircuit != null) {
+            for (Component component : components) if (component instanceof LED led) led.setInput(false);
+            for (Wire wire : wires) wire.setActive(false);
+            updateStatus(shortCircuit);
+            return;
+        }
         // Симуляция: если кнопка нажата и соединена с LED через провода, LED загорается
         // Резистор ограничивает ток (в простой модели - ослабляет сигнал)
         // Без резистора слишком много LED перегорят!
@@ -2408,6 +2368,7 @@ public class ArduinoController implements Initializable {
                 compObj.addProperty("resistance", ((Resistor) component).getResistance());
             } else if (component instanceof ArduinoUNO) {
                 compObj.addProperty("state", ((ArduinoUNO) component).isPowered());
+                compObj.addProperty("programSource", ((ArduinoUNO) component).getProgramSource());
             } else if (component instanceof Timer) {
                 Timer timer = (Timer) component;
                 compObj.addProperty("state", timer.isActive());
@@ -2531,6 +2492,9 @@ public class ArduinoController implements Initializable {
                     break;
                 case "ArduinoUNO":
                     component = new ArduinoUNO(x, y);
+                    if (compObj.has("programSource") && !compObj.get("programSource").isJsonNull()) {
+                        ((ArduinoUNO) component).setProgramSource(compObj.get("programSource").getAsString());
+                    }
                     if (compObj.has("state")) ((ArduinoUNO) component).setPowered(compObj.get("state").getAsBoolean());
                     break;
                 case "Timer":
